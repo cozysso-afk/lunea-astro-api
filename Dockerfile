@@ -1,13 +1,18 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install -r requirements.txt
 
 COPY astro_core.py astro_api.py ./
 
-# Ephemeris를 이미지 빌드 단계에서 미리 받아 cold start 때 재다운로드하지 않게 함.
 RUN python -c "from astro_core import load_ephemeris; x=load_ephemeris(); print('Ephemeris:', x[5])"
 
 ENV PORT=10000
