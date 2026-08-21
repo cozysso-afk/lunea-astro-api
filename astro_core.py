@@ -1008,3 +1008,401 @@ def scan_transits(natal, topic="general", start_iso=None, days=30, timezone_name
             "note":"Transit activation is a timing/activation signal, not a guaranteed event outcome."
         }
     }
+
+# ============================================================
+# LUNEA RETURN ENGINE V1
+# ============================================================
+
+RETURN_CONFIG_V1 = {
+    "Moon":    {"window_days": 40,    "step_hours": 1.0,  "label_ko":"달회귀"},
+    "Sun":     {"window_days": 400,   "step_hours": 12.0, "label_ko":"태양회귀"},
+    "Mercury": {"window_days": 500,   "step_hours": 6.0,  "label_ko":"수성회귀"},
+    "Venus":   {"window_days": 600,   "step_hours": 12.0, "label_ko":"금성회귀"},
+    "Mars":    {"window_days": 900,   "step_hours": 12.0, "label_ko":"화성회귀"},
+    "Jupiter": {"window_days": 5000,  "step_hours": 48.0, "label_ko":"목성회귀"},
+    "Saturn":  {"window_days": 12000, "step_hours": 96.0, "label_ko":"토성회귀"},
+}
+
+RETURN_ALLOWED_BODIES = tuple(RETURN_CONFIG_V1.keys())
+
+def _return_delta(body, target_lon, dt_utc):
+    lon = get_tropical_ecliptic_lon(body, sf_time(dt_utc))
+    return circular_delta(lon, target_lon)
+
+def _bisect_return_crossing(body, target_lon, left_dt, right_dt, iterations=52):
+    fl = _return_delta(body, target_lon, left_dt)
+    fr = _return_delta(body, target_lon, right_dt)
+    if abs(fl) < 1e-8:
+        return left_dt
+    if abs(fr) < 1e-8:
+        return right_dt
+    if fl * fr > 0:
+        return None
+
+    a, b = left_dt, right_dt
+    fa, fb = fl, fr
+    for _ in range(iterations):
+        mid = a + (b-a)/2
+        fm = _return_delta(body, target_lon, mid)
+        if abs(fm) < 1e-8 or (b-a).total_seconds() <= .5:
+            return mid
+        if fa * fm <= 0:
+            b, fb = mid, fm
+        else:
+            a, fa = mid, fm
+    return a + (b-a)/2
+
+def _dedup_datetimes(values, tolerance_seconds=1800):
+    out = []
+    for dt in sorted(values):
+        if not out or abs((dt-out[-1]).total_seconds()) > tolerance_seconds:
+            out.append(dt)
+    return out
+
+def find_longitude_crossings_v1(body, target_lon, start_dt_utc, end_dt_utc, step_hours):
+    samples = _sample_datetimes(start_dt_utc, end_dt_utc, step_hours)
+    lons = get_tropical_ecliptic_lons(body, samples)
+    vals = circular_delta_array(lons, target_lon)
+    roots = []
+
+    # Normal sign-changing longitude crossings.
+    for i in range(len(samples)-1):
+        a, b = float(vals[i]), float(vals[i+1])
+        # Ignore circular wrap at +/-180; return target is near zero.
+        if max(abs(a), abs(b)) > 90:
+            continue
+        if a == 0:
+            roots.append(samples[i])
+            continue
+        if a*b <= 0:
+            root = _bisect_return_crossing(
+                body, target_lon, samples[i], samples[i+1]
+            )
+            if root is not None:
+                roots.append(root)
+
+    # A station can touch the natal degree and reverse without a clean sign change.
+    absvals = np.abs(vals)
+    for i in range(1, len(samples)-1):
+        if absvals[i] <= absvals[i-1] and absvals[i] <= absvals[i+1] and absvals[i] <= .75:
+            dt, orb = _refine_minimum_orb(
+                body, target_lon, 0.0, samples[i-1], samples[i+1], iterations=18
+            )
+            if orb <= .06:
+                roots.append(dt)
+
+    return _dedup_datetimes(roots)
+
+def _classify_return_passes(body, roots):
+    rows = []
+    for dt in roots:
+        _, speed, direction = planet_motion(body, dt)
+        rows.append({
+            "dt":dt,
+            "direction":direction,
+            "speed":float(speed),
+            "pass_type":"single_pass",
+            "pass_label_ko":"단일 통과",
+        })
+
+    # If retrograde creates multiple passes in the same cycle, distinguish them.
+    for i,row in enumerate(rows):
+        if row["direction"] == "역행":
+            row["pass_type"] = "retrograde_pass"
+            row["pass_label_ko"] = "역행 통과"
+            continue
+
+        nearby_retro_before = any(
+            r["direction"]=="역행" and 0 < (row["dt"]-r["dt"]).total_seconds() <= 140*86400
+            for r in rows
+        )
+        nearby_retro_after = any(
+            r["direction"]=="역행" and 0 < (r["dt"]-row["dt"]).total_seconds() <= 140*86400
+            for r in rows
+        )
+        if nearby_retro_after:
+            row["pass_type"] = "first_pass"
+            row["pass_label_ko"] = "1차 순행 통과"
+        elif nearby_retro_before:
+            row["pass_type"] = "final_pass"
+            row["pass_label_ko"] = "최종 순행 통과"
+    return rows
+
+def _return_chart_snapshot(body, exact_dt_utc, latitude, longitude):
+    houses = compute_houses(exact_dt_utc, latitude, longitude)
+    bodies = ["Sun","Moon","Mercury","Venus","Mars","Jupiter","Saturn"]
+    planets = {}
+    for name in bodies:
+        lon = get_tropical_ecliptic_lon(name, sf_time(exact_dt_utc))
+        planets[name] = {
+            **sign_data(lon),
+            "name_ko": PLANET_KO.get(name,name),
+            "whole_house": whole_sign_house(lon,houses["asc"]),
+            "placidus_house": cusp_house(lon,houses["placidus_cusps"]),
+        }
+    angles = {}
+    for key,ko,value in [
+        ("ASC","상승점",houses["asc"]),
+        ("MC","중천점",houses["mc"]),
+        ("Vertex","버텍스",houses["vertex"]),
+    ]:
+        angles[key] = {
+            **sign_data(value),
+            "name_ko":ko,
+            "whole_house":whole_sign_house(value,houses["asc"]),
+            "placidus_house":cusp_house(value,houses["placidus_cusps"]),
+        }
+    return {
+        "focus_body":body,
+        "planets":planets,
+        "angles":angles,
+    }
+
+def _return_row_json(row, timezone_name):
+    return {
+        "time":_iso_local(row["dt"],timezone_name),
+        "direction":row["direction"],
+        "speed_deg_per_day":round(row["speed"],6),
+        "pass_type":row["pass_type"],
+        "pass_label_ko":row["pass_label_ko"],
+    }
+
+def calculate_return_context(
+    natal,
+    bodies,
+    center_iso=None,
+    timezone_name="Asia/Seoul",
+    place=None,
+    lat=None,
+    lon=None,
+):
+    if not isinstance(natal,dict):
+        raise ValueError("Natal payload가 필요합니다.")
+
+    natal_planets = natal.get("planets") or {}
+    center_dt = _as_aware_utc(center_iso)
+
+    requested = []
+    for body in bodies or []:
+        if body in RETURN_ALLOWED_BODIES and body not in requested:
+            requested.append(body)
+    if not requested:
+        requested = ["Sun","Moon"]
+
+    birth = natal.get("birth") or {}
+    if lat is None:
+        lat = birth.get("latitude")
+    if lon is None:
+        lon = birth.get("longitude")
+    if place is None:
+        place = birth.get("place_resolved") or birth.get("place_input")
+
+    latitude, longitude, resolved_place = resolve_coordinates(place,lat,lon)
+
+    results = {}
+    for body in requested:
+        body_data = natal_planets.get(body)
+        if not isinstance(body_data,dict) or body_data.get("longitude") is None:
+            continue
+        target_lon = float(body_data["longitude"])
+        cfg = RETURN_CONFIG_V1[body]
+        start = center_dt - timedelta(days=cfg["window_days"])
+        end = center_dt + timedelta(days=cfg["window_days"])
+
+        roots = find_longitude_crossings_v1(
+            body,target_lon,start,end,cfg["step_hours"]
+        )
+        classified = _classify_return_passes(body,roots)
+        prev = [r for r in classified if r["dt"] <= center_dt]
+        fut = [r for r in classified if r["dt"] > center_dt]
+        previous = max(prev,key=lambda x:x["dt"]) if prev else None
+        next_row = min(fut,key=lambda x:x["dt"]) if fut else None
+
+        anchor = next_row or previous
+        snapshot = None
+        if anchor:
+            snapshot = _return_chart_snapshot(
+                body,anchor["dt"],latitude,longitude
+            )
+
+        results[body] = {
+            "body":body,
+            "body_ko":PLANET_KO.get(body,body),
+            "return_label_ko":cfg["label_ko"],
+            "natal_longitude":round(target_lon,6),
+            "previous":_return_row_json(previous,timezone_name) if previous else None,
+            "next":_return_row_json(next_row,timezone_name) if next_row else None,
+            "all_passes":[_return_row_json(r,timezone_name) for r in classified],
+            "anchor_chart":snapshot,
+        }
+
+    return {
+        "schema":"LUNEA_RETURN_CONTEXT_V1",
+        "center":_iso_local(center_dt,timezone_name),
+        "timezone":timezone_name,
+        "location":{
+            "place_input":place,
+            "place_resolved":resolved_place,
+            "latitude":latitude,
+            "longitude":longitude,
+            "note":"Return house/angle positions depend on the location used for the return moment."
+        },
+        "requested_bodies":requested,
+        "returns":results,
+        "rules":{
+            "zodiac":"tropical",
+            "house_primary":"whole_sign",
+            "house_secondary":"placidus",
+            "note":"A return describes a planetary cycle/context; it does not guarantee a specific event."
+        }
+    }
+
+
+# ============================================================
+# LUNEA THAI TAKSA V1
+# ============================================================
+
+THAI_TAKSA_SEQUENCE = [1,2,3,4,7,5,8,6]
+
+THAI_PLANET_INFO = {
+    1:{"key":"Sun","ko":"태양","thai":"อาทิตย์","weekday_ko":"일요일"},
+    2:{"key":"Moon","ko":"달","thai":"จันทร์","weekday_ko":"월요일"},
+    3:{"key":"Mars","ko":"화성","thai":"อังคาร","weekday_ko":"화요일"},
+    4:{"key":"Mercury","ko":"수성","thai":"พุธ","weekday_ko":"수요일 낮"},
+    5:{"key":"Jupiter","ko":"목성","thai":"พฤหัสบดี","weekday_ko":"목요일"},
+    6:{"key":"Venus","ko":"금성","thai":"ศุกร์","weekday_ko":"금요일"},
+    7:{"key":"Saturn","ko":"토성","thai":"เสาร์","weekday_ko":"토요일"},
+    8:{"key":"Rahu","ko":"라후","thai":"ราหู","weekday_ko":"수요일 밤"},
+}
+
+TAKSA_POSITIONS = [
+    ("Boriwan","บริวาร","보리완","주변 사람·관계망·기본 환경"),
+    ("Ayu","อายุ","아유","생명력·건강·지속성"),
+    ("Dech","เดช","데트","힘·권위·명예·사회적 영향"),
+    ("Sri","ศรี","시리","매력·호감·명예·행운의 보조"),
+    ("Mula","มูละ","물라","재산·자원·기반"),
+    ("Utsaha","อุตสาหะ","웃사하","노력·일·실행력"),
+    ("Montri","มนตรี","몬뜨리","도움·조언·후원자"),
+    ("Kalakini","กาลกิณี","깔라끼니","마찰·취약점·피해야 할 요소"),
+]
+
+TAKSA_TOPIC_FOCUS = {
+    "연락":["Montri","Utsaha"],
+    "소식":["Montri","Dech"],
+    "재회":["Sri","Montri","Boriwan"],
+    "연애":["Sri","Boriwan"],
+    "시험":["Dech","Utsaha","Montri"],
+    "학업":["Utsaha","Montri"],
+    "직장":["Dech","Utsaha","Montri"],
+    "이직":["Dech","Utsaha","Mula"],
+    "금전":["Mula","Sri"],
+    "투자심리":["Mula","Utsaha","Kalakini"],
+    "general":["Boriwan","Ayu","Montri"],
+}
+
+def _thai_local_dt(iso_value, timezone_name):
+    tz = ZoneInfo(timezone_name or "Asia/Seoul")
+    if iso_value:
+        dt = datetime.fromisoformat(str(iso_value).replace("Z","+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz)
+        else:
+            dt = dt.astimezone(tz)
+        return dt
+    return datetime.now(tz)
+
+def _thai_effective_day(local_dt):
+    # Traditional Taksa-style day boundary: 06:00 local time.
+    if local_dt.hour < 6:
+        effective_date = (local_dt - timedelta(days=1)).date()
+    else:
+        effective_date = local_dt.date()
+    weekday = effective_date.weekday()  # Mon=0
+
+    # Wednesday night / Rahu: Wednesday 18:00 through Thursday 05:59.
+    if weekday == 2 and (local_dt.hour >= 18 or local_dt.hour < 6):
+        return 8, effective_date, "Wednesday night / Rahu"
+    mapping = {0:2,1:3,2:4,3:5,4:6,5:7,6:1}
+    return mapping[weekday], effective_date, "weekday ruler"
+
+def _taksa_grid_for_birth_planet(birth_planet_number):
+    idx = THAI_TAKSA_SEQUENCE.index(int(birth_planet_number))
+    rotated = THAI_TAKSA_SEQUENCE[idx:] + THAI_TAKSA_SEQUENCE[:idx]
+    rows = []
+    for (en,thai,ko,meaning),planet_number in zip(TAKSA_POSITIONS,rotated):
+        info = THAI_PLANET_INFO[planet_number]
+        rows.append({
+            "position":en,
+            "position_thai":thai,
+            "position_ko":ko,
+            "meaning_ko":meaning,
+            "planet_number":planet_number,
+            "planet":info["key"],
+            "planet_ko":info["ko"],
+            "planet_thai":info["thai"],
+        })
+    return rows
+
+def calculate_thai_taksa(
+    natal,
+    topic="general",
+    current_iso=None,
+    timezone_name="Asia/Seoul",
+):
+    if not isinstance(natal,dict):
+        raise ValueError("Natal payload가 필요합니다.")
+    birth = natal.get("birth") or {}
+    birth_iso = birth.get("local_iso")
+    if not birth_iso:
+        raise ValueError("Natal birth.local_iso가 필요합니다.")
+
+    birth_local = _thai_local_dt(birth_iso,timezone_name)
+    birth_number,effective_birth_date,birth_rule = _thai_effective_day(birth_local)
+    grid = _taksa_grid_for_birth_planet(birth_number)
+
+    current_local = _thai_local_dt(current_iso,timezone_name)
+    current_number,effective_current_date,current_rule = _thai_effective_day(current_local)
+
+    current_position = next(
+        (r for r in grid if r["planet_number"]==current_number),None
+    )
+    topic_key = topic if topic in TAKSA_TOPIC_FOCUS else "general"
+    focus_positions = TAKSA_TOPIC_FOCUS[topic_key]
+    focus_rows = [r for r in grid if r["position"] in focus_positions]
+
+    kalakini = next((r for r in grid if r["position"]=="Kalakini"),None)
+
+    return {
+        "schema":"LUNEA_THAI_TAKSA_V1",
+        "system":"Maha Taksa / Taksa-Pakorn",
+        "birth":{
+            "local_iso":birth_local.isoformat(),
+            "effective_date":effective_birth_date.isoformat(),
+            "planet_number":birth_number,
+            "weekday_label":THAI_PLANET_INFO[birth_number]["weekday_ko"],
+            "ruler":THAI_PLANET_INFO[birth_number],
+            "day_boundary":"06:00 local time",
+            "rule_detail":birth_rule,
+        },
+        "grid":grid,
+        "kalakini":kalakini,
+        "question":{
+            "topic":topic_key,
+            "focus_positions":focus_positions,
+            "focus_rows":focus_rows,
+            "mapping_type":"LUNEA question-resonance layer; not a classical event-timing formula",
+        },
+        "current_day":{
+            "local_iso":current_local.isoformat(),
+            "effective_date":effective_current_date.isoformat(),
+            "planet_number":current_number,
+            "ruler":THAI_PLANET_INFO[current_number],
+            "falls_in_natal_taksa":current_position,
+            "interpretation_scope":"daily symbolic emphasis only; not a precise event forecast",
+        },
+        "rules":{
+            "wednesday_night":"18:00 Wednesday through 05:59 Thursday = Rahu (8)",
+            "day_boundary":"06:00 local time",
+            "forecast_limit":"Taksa is kept as a separate structural/support layer. Precise dates remain Western Transit/Return territory."
+        }
+    }

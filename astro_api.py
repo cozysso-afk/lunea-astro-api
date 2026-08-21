@@ -5,11 +5,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from astro_core import compute_natal, scan_transits, KOREA_BIRTHPLACES
+from astro_core import compute_natal, scan_transits, calculate_return_context, calculate_thai_taksa, KOREA_BIRTHPLACES
 
 app = FastAPI(
     title="LUNEA Astro Core",
-    version="1.1.0",
+    version="1.2.0",
     description="Deterministic Western astrology calculation service for LUNEA."
 )
 
@@ -36,7 +36,7 @@ class NatalRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "LUNEA Astro Core", "version": "1.1.0", "transit_scan": True}
+    return {"ok": True, "service": "LUNEA Astro Core", "version": "1.2.0", "transit_scan": True, "returns": True, "thai_taksa": True}
 
 @app.get("/v1/locations")
 def locations():
@@ -89,4 +89,56 @@ def transit_scan(req: TransitScanRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Transit 스캔 실패: {type(exc).__name__}: {exc}"
+        )
+
+class ReturnContextRequest(BaseModel):
+    natal: dict
+    bodies: list[str] = Field(default_factory=lambda: ["Sun","Moon"])
+    center_iso: Optional[str] = None
+    timezone: str = Field(default="Asia/Seoul")
+    place: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+@app.post("/v1/returns/context")
+def return_context(req: ReturnContextRequest):
+    try:
+        return calculate_return_context(
+            natal=req.natal,
+            bodies=req.bodies,
+            center_iso=req.center_iso,
+            timezone_name=req.timezone,
+            place=req.place,
+            lat=req.lat,
+            lon=req.lon,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Return 계산 실패: {type(exc).__name__}: {exc}"
+        )
+
+class ThaiTaksaRequest(BaseModel):
+    natal: dict
+    topic: str = Field(default="general")
+    current_iso: Optional[str] = None
+    timezone: str = Field(default="Asia/Seoul")
+
+@app.post("/v1/thai/taksa")
+def thai_taksa(req: ThaiTaksaRequest):
+    try:
+        return calculate_thai_taksa(
+            natal=req.natal,
+            topic=req.topic,
+            current_iso=req.current_iso,
+            timezone_name=req.timezone,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Thai Taksa 계산 실패: {type(exc).__name__}: {exc}"
         )
