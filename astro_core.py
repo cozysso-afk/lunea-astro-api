@@ -367,6 +367,612 @@ def compute_natal(
             "calculation": "Skyfield apparent tropical longitude + Swiss Ephemeris houses",
         },
     }
+
+# ============================================================
+# LUNEA HORARY V1
+# - A separate question-moment chart. It never reuses natal data.
+# - Tropical zodiac + Regiomontanus houses.
+# - Traditional seven planets and Ptolemaic aspects only.
+# - Produces deterministic calculation evidence; final judgment remains
+#   interpretive and must preserve the original question.
+# ============================================================
+
+HORARY_PLANETS = ("Sun", "Moon", "Mercury", "Venus", "Mars", "Jupiter", "Saturn")
+
+HORARY_ASPECTS = {
+    "conjunction": {"angle": 0.0, "label_ko": "합"},
+    "sextile": {"angle": 60.0, "label_ko": "육십분위"},
+    "square": {"angle": 90.0, "label_ko": "사분위"},
+    "trine": {"angle": 120.0, "label_ko": "삼분위"},
+    "opposition": {"angle": 180.0, "label_ko": "충"},
+}
+
+HORARY_RULER_BY_SIGN = (
+    "Mars", "Venus", "Mercury", "Moon", "Sun", "Mercury",
+    "Venus", "Mars", "Jupiter", "Saturn", "Saturn", "Jupiter",
+)
+
+HORARY_EXALTATION_BY_SIGN = (
+    "Sun", "Moon", None, "Jupiter", None, "Mercury",
+    "Saturn", None, None, "Mars", None, "Venus",
+)
+
+HORARY_TOPIC_SPECS = {
+    "general": {
+        "label_ko": "일반·특정 상대",
+        "quesited_house": 7,
+        "event_house": None,
+        "note": "일반 질문의 기본 상대축으로 7하우스를 사용합니다.",
+    },
+    "relationship": {
+        "label_ko": "연애·상대방",
+        "quesited_house": 7,
+        "event_house": 5,
+        "note": "특정 상대는 7하우스, 연애의 전개는 5하우스를 보조로 봅니다.",
+    },
+    "reconciliation": {
+        "label_ko": "재회·관계 회복",
+        "quesited_house": 7,
+        "event_house": None,
+        "note": "질문자와 특정 상대의 1–7하우스 관계축을 우선합니다.",
+    },
+    "contact": {
+        "label_ko": "연락·메시지",
+        "quesited_house": 7,
+        "event_house": 9,
+        "note": "특정 상대는 7하우스, 상대의 연락은 7하우스에서 파생한 3번째인 9하우스를 보조로 봅니다.",
+    },
+    "career": {
+        "label_ko": "직장·이직·커리어",
+        "quesited_house": 10,
+        "event_house": None,
+        "note": "직업·지위·결과를 나타내는 10하우스를 사용합니다.",
+    },
+    "exam": {
+        "label_ko": "시험·합격",
+        "quesited_house": 9,
+        "event_house": 10,
+        "note": "학업·시험은 9하우스, 판정·결과는 10하우스를 보조로 봅니다.",
+    },
+    "money": {
+        "label_ko": "금전·재물",
+        "quesited_house": 2,
+        "event_house": None,
+        "note": "질문자의 자산과 현금 흐름을 나타내는 2하우스를 사용합니다.",
+    },
+    "stock": {
+        "label_ko": "주식·투기적 투자",
+        "quesited_house": 5,
+        "event_house": 2,
+        "note": "투기·위험 감수는 5하우스, 실제 자금은 2하우스를 보조로 봅니다.",
+    },
+    "home": {
+        "label_ko": "집·부동산·가족 기반",
+        "quesited_house": 4,
+        "event_house": None,
+        "note": "집·토지·가족 기반을 나타내는 4하우스를 사용합니다.",
+    },
+    "health": {
+        "label_ko": "건강·회복",
+        "quesited_house": 6,
+        "event_house": 1,
+        "note": "질병·관리의 6하우스와 질문자 신체의 1하우스를 함께 봅니다.",
+    },
+    "legal": {
+        "label_ko": "법률·소송·공적 판단",
+        "quesited_house": 9,
+        "event_house": 10,
+        "note": "법률은 9하우스, 판결·공적 결과는 10하우스를 보조로 봅니다.",
+    },
+}
+
+def _horary_local_to_utc(question_iso: str, timezone_name: str):
+    if not question_iso:
+        raise ValueError("질문을 처음 분명하게 이해한 시각이 필요합니다.")
+    tz = ZoneInfo(timezone_name or "Asia/Seoul")
+    raw = str(question_iso).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError("질문 시각은 ISO 형식이어야 합니다.") from exc
+    if dt.tzinfo is None:
+        local_dt = dt.replace(tzinfo=tz)
+    else:
+        local_dt = dt.astimezone(tz)
+    return local_dt, local_dt.astimezone(UTC)
+
+def compute_regiomontanus_houses(dt_utc, latitude, longitude):
+    jd_ut = to_jd_ut(dt_utc)
+    cusps, ascmc = swe.houses_ex(
+        jd_ut, float(latitude), float(longitude), b"R", 0
+    )
+    return {
+        "jd_ut": jd_ut,
+        "asc": float(ascmc[0] % 360.0),
+        "mc": float(ascmc[1] % 360.0),
+        "vertex": float(ascmc[3] % 360.0),
+        "cusps": [float(x % 360.0) for x in cusps],
+    }
+
+def _horary_ruler_for_cusp(cusp_lon):
+    return HORARY_RULER_BY_SIGN[int((cusp_lon % 360.0) // 30)]
+
+def _horary_aspect_limit(body_a, body_b, aspect_key):
+    base = {
+        "conjunction": 8.0,
+        "sextile": 5.0,
+        "square": 7.0,
+        "trine": 7.0,
+        "opposition": 8.0,
+    }[aspect_key]
+    if "Moon" in {body_a, body_b}:
+        base += 2.0
+    elif "Sun" in {body_a, body_b}:
+        base += 1.0
+    return base
+
+def _horary_aspect_state(body_a, row_a, body_b, row_b):
+    sep_now = angular_separation(row_a["longitude"], row_b["longitude"])
+    candidates = []
+    for key, spec in HORARY_ASPECTS.items():
+        candidates.append((abs(sep_now - spec["angle"]), key, spec))
+    orb, key, spec = min(candidates)
+    limit = _horary_aspect_limit(body_a, body_b, key)
+
+    hours = 1.0 if "Moon" in {body_a, body_b} else 3.0
+    fraction = hours / 24.0
+    sep_past = angular_separation(
+        row_a["longitude"] - row_a["speed_deg_per_day"] * fraction,
+        row_b["longitude"] - row_b["speed_deg_per_day"] * fraction,
+    )
+    sep_future = angular_separation(
+        row_a["longitude"] + row_a["speed_deg_per_day"] * fraction,
+        row_b["longitude"] + row_b["speed_deg_per_day"] * fraction,
+    )
+    orb_past = abs(sep_past - spec["angle"])
+    orb_future = abs(sep_future - spec["angle"])
+
+    if orb <= 0.05:
+        phase = "exact"
+        phase_ko = "정확"
+    elif orb <= limit and orb_future + 0.005 < orb:
+        phase = "applying"
+        phase_ko = "적용"
+    elif orb <= limit and orb_past + 0.005 < orb:
+        phase = "separating"
+        phase_ko = "분리"
+    elif orb <= limit:
+        phase = "unclear"
+        phase_ko = "정지·전환 확인 필요"
+    else:
+        phase = "out_of_orb"
+        phase_ko = "유효 오브 밖"
+
+    return {
+        "a": body_a,
+        "a_ko": PLANET_KO[body_a],
+        "b": body_b,
+        "b_ko": PLANET_KO[body_b],
+        "aspect": key,
+        "aspect_ko": spec["label_ko"],
+        "angle": spec["angle"],
+        "orb": round(float(orb), 4),
+        "max_orb": round(float(limit), 2),
+        "phase": phase,
+        "phase_ko": phase_ko,
+        "within_orb": bool(orb <= limit),
+        "relative_speed_deg_per_day": round(
+            abs(row_a["speed_deg_per_day"] - row_b["speed_deg_per_day"]), 6
+        ),
+    }
+
+def _horary_dignity(body, sign_index):
+    if HORARY_RULER_BY_SIGN[sign_index] == body:
+        return "domicile", "본질적 존귀·도머사일"
+    if HORARY_EXALTATION_BY_SIGN[sign_index] == body:
+        return "exaltation", "고양"
+    opposite = (sign_index + 6) % 12
+    if HORARY_RULER_BY_SIGN[opposite] == body:
+        return "detriment", "손상·디트리먼트"
+    if HORARY_EXALTATION_BY_SIGN[opposite] == body:
+        return "fall", "추락"
+    return "peregrine", "무권위·페레그린"
+
+def _horary_reception(body_a, row_a, body_b, row_b):
+    a_sign = int(row_a["sign_index"])
+    b_sign = int(row_b["sign_index"])
+    a_in_b_domicile = HORARY_RULER_BY_SIGN[a_sign] == body_b
+    b_in_a_domicile = HORARY_RULER_BY_SIGN[b_sign] == body_a
+    a_in_b_exaltation = HORARY_EXALTATION_BY_SIGN[a_sign] == body_b
+    b_in_a_exaltation = HORARY_EXALTATION_BY_SIGN[b_sign] == body_a
+    return {
+        "a": body_a,
+        "b": body_b,
+        "a_in_b_domicile": a_in_b_domicile,
+        "b_in_a_domicile": b_in_a_domicile,
+        "a_in_b_exaltation": a_in_b_exaltation,
+        "b_in_a_exaltation": b_in_a_exaltation,
+        "mutual_domicile": a_in_b_domicile and b_in_a_domicile,
+        "mutual_reception": (
+            (a_in_b_domicile or a_in_b_exaltation)
+            and (b_in_a_domicile or b_in_a_exaltation)
+        ),
+        "has_reception": (
+            a_in_b_domicile or b_in_a_domicile
+            or a_in_b_exaltation or b_in_a_exaltation
+        ),
+    }
+
+def _horary_refine_pair(body_a, body_b, aspect_angle, left_dt, right_dt, iterations=12):
+    def orb_at(dt):
+        a = get_tropical_ecliptic_lon(body_a, sf_time(dt))
+        b = get_tropical_ecliptic_lon(body_b, sf_time(dt))
+        return abs(angular_separation(a, b) - aspect_angle)
+
+    left, right = left_dt, right_dt
+    for _ in range(iterations):
+        span = right - left
+        m1 = left + span / 3
+        m2 = right - span / 3
+        if orb_at(m1) <= orb_at(m2):
+            right = m2
+        else:
+            left = m1
+    exact = left + (right - left) / 2
+    return exact, orb_at(exact)
+
+def _horary_perfection_candidate(body_a, row_a, body_b, row_b, dt_utc, timezone_name):
+    if body_a == body_b:
+        return {
+            "perfects": False,
+            "reason": "same_significator",
+            "reason_ko": "질문자와 대상의 주인이 같아 두 행성 간 적용각으로 판정할 수 없습니다.",
+        }
+
+    aspect = _horary_aspect_state(body_a, row_a, body_b, row_b)
+    if aspect["phase"] not in {"applying", "exact"}:
+        return {
+            "perfects": False,
+            "reason": "no_applying_aspect",
+            "reason_ko": "현재 유효 오브 안에서 두 주인행성의 적용각이 확인되지 않습니다.",
+            "aspect": aspect,
+        }
+    if aspect["phase"] == "exact":
+        return {
+            "perfects": True,
+            "reason": "exact_now",
+            "reason_ko": "질문 시각에 두 주인행성의 각이 이미 정확합니다.",
+            "aspect": aspect,
+            "exact_utc": dt_utc.isoformat(),
+            "exact_local": _iso_local(dt_utc, timezone_name),
+            "days_from_question": 0.0,
+            "before_sign_change": True,
+        }
+
+    rel_speed = aspect["relative_speed_deg_per_day"]
+    if rel_speed < 0.01:
+        return {
+            "perfects": False,
+            "reason": "relative_motion_too_slow",
+            "reason_ko": "상대 속도가 너무 느려 성사 시각을 안정적으로 잡을 수 없습니다.",
+            "aspect": aspect,
+        }
+
+    rough_days = aspect["orb"] / rel_speed
+    max_days = min(30.0, max(2.0, rough_days * 1.8 + 1.0))
+    step_hours = 1.0 if "Moon" in {body_a, body_b} else 3.0
+    times = _sample_datetimes(dt_utc, dt_utc + timedelta(days=max_days), step_hours)
+    a_lons = get_tropical_ecliptic_lons(body_a, times)
+    b_lons = get_tropical_ecliptic_lons(body_b, times)
+    seps = np.abs((a_lons - b_lons + 180.0) % 360.0 - 180.0)
+    orbs = np.abs(seps - aspect["angle"])
+    idx = int(np.argmin(orbs))
+
+    if float(orbs[idx]) > 0.35:
+        return {
+            "perfects": False,
+            "reason": "aspect_does_not_perfect",
+            "reason_ko": "적용 중으로 보이지만 30일 안에 정확각 성사가 확인되지 않습니다.",
+            "aspect": aspect,
+        }
+
+    left = times[max(0, idx - 1)]
+    right = times[min(len(times) - 1, idx + 1)]
+    exact_dt, exact_orb = _horary_refine_pair(
+        body_a, body_b, aspect["angle"], left, right
+    )
+    a_exact = get_tropical_ecliptic_lon(body_a, sf_time(exact_dt))
+    b_exact = get_tropical_ecliptic_lon(body_b, sf_time(exact_dt))
+    before_sign_change = (
+        int(a_exact // 30) == int(row_a["longitude"] // 30)
+        and int(b_exact // 30) == int(row_b["longitude"] // 30)
+    )
+    days_from = (exact_dt - dt_utc).total_seconds() / 86400.0
+    return {
+        "perfects": bool(before_sign_change),
+        "reason": "perfects" if before_sign_change else "sign_change_before_perfection",
+        "reason_ko": (
+            "두 주인행성의 적용각이 별자리 변경 전에 정확해집니다."
+            if before_sign_change
+            else "정확각 후보 전 한쪽 주인행성이 별자리를 바꾸므로 단순 성사로 판정하지 않습니다."
+        ),
+        "aspect": aspect,
+        "exact_utc": exact_dt.isoformat(),
+        "exact_local": _iso_local(exact_dt, timezone_name),
+        "exact_orb": round(float(exact_orb), 6),
+        "days_from_question": round(float(days_from), 4),
+        "before_sign_change": before_sign_change,
+    }
+
+def _horary_moon_course(planets, dt_utc, timezone_name):
+    moon = planets["Moon"]
+    speed = max(0.01, float(moon["speed_deg_per_day"]))
+    remaining = (30.0 - (moon["longitude"] % 30.0)) % 30.0
+    if remaining < 1e-6:
+        remaining = 30.0
+    days_to_exit = min(3.5, remaining / speed)
+    end_dt = dt_utc + timedelta(days=days_to_exit)
+    times = _sample_datetimes(dt_utc, end_dt, 1.0)
+    moon_lons = get_tropical_ecliptic_lons("Moon", times)
+    hits = []
+
+    for body in HORARY_PLANETS:
+        if body == "Moon":
+            continue
+        other_lons = get_tropical_ecliptic_lons(body, times)
+        seps = np.abs((moon_lons - other_lons + 180.0) % 360.0 - 180.0)
+        for key, spec in HORARY_ASPECTS.items():
+            orbs = np.abs(seps - spec["angle"])
+            if len(orbs) < 2:
+                continue
+            idx = int(np.argmin(orbs))
+            minimum = float(orbs[idx])
+            if idx == 0 or minimum > 0.35:
+                continue
+            hits.append({
+                "body": body,
+                "body_ko": PLANET_KO[body],
+                "aspect": key,
+                "aspect_ko": spec["label_ko"],
+                "time_local": _iso_local(times[idx], timezone_name),
+                "hours_from_question": round(
+                    (times[idx] - dt_utc).total_seconds() / 3600.0, 2
+                ),
+                "orb": round(minimum, 4),
+            })
+
+    hits.sort(key=lambda x: x["hours_from_question"])
+    return {
+        "void_of_course": not bool(hits),
+        "sign_exit_local": _iso_local(end_dt, timezone_name),
+        "hours_to_sign_exit": round(days_to_exit * 24.0, 2),
+        "next_aspects": hits[:6],
+    }
+
+def _horary_potential_prohibitions(planets, querent_ruler, quesited_ruler, main):
+    if not main or not main.get("perfects") or not main.get("days_from_question"):
+        return []
+    main_days = float(main["days_from_question"])
+    out = []
+    for third in HORARY_PLANETS:
+        if third in {querent_ruler, quesited_ruler}:
+            continue
+        for target in {querent_ruler, quesited_ruler}:
+            record = _horary_aspect_state(
+                third, planets[third], target, planets[target]
+            )
+            rel_speed = record["relative_speed_deg_per_day"]
+            if record["phase"] != "applying" or rel_speed < 0.01:
+                continue
+            estimate = record["orb"] / rel_speed
+            if 0 < estimate < main_days:
+                out.append({
+                    "intervening": third,
+                    "intervening_ko": PLANET_KO[third],
+                    "target": target,
+                    "target_ko": PLANET_KO[target],
+                    "aspect": record["aspect"],
+                    "aspect_ko": record["aspect_ko"],
+                    "estimated_days": round(float(estimate), 3),
+                    "classification": "potential_only",
+                    "note_ko": "주 성사각보다 먼저 정확해질 수 있는 잠재 개입각입니다. 이것만으로 고전적 금지·프로히비션을 확정하지 않습니다.",
+                })
+    out.sort(key=lambda x: x["estimated_days"])
+    return out[:6]
+
+def _horary_warning_flags(houses, planets, moon_course):
+    warnings = []
+    asc_degree = houses["asc"] % 30.0
+    if asc_degree < 3.0:
+        warnings.append({
+            "code": "early_asc",
+            "level": "caution",
+            "text_ko": "ASC(상승점)가 별자리 초도수입니다. 질문이 아직 충분히 무르익지 않았을 가능성을 점검하세요.",
+        })
+    if asc_degree > 27.0:
+        warnings.append({
+            "code": "late_asc",
+            "level": "caution",
+            "text_ko": "ASC(상승점)가 별자리 말도수입니다. 상황이 이미 상당 부분 결정됐을 가능성을 점검하세요.",
+        })
+    if planets["Saturn"]["house"] == 7:
+        warnings.append({
+            "code": "saturn_in_7",
+            "level": "caution",
+            "text_ko": "Saturn(토성)이 7하우스에 있습니다. 해석 오류·지연 가능성을 특별히 경계하는 전통적 고려사항입니다.",
+        })
+    moon_lon = planets["Moon"]["longitude"]
+    if 195.0 <= moon_lon <= 225.0:
+        warnings.append({
+            "code": "moon_via_combusta",
+            "level": "caution",
+            "text_ko": "Moon(달)이 Via Combusta(비아 콤부스타·연소의 길)에 있습니다. 정서적 혼란과 불안정성을 경계합니다.",
+        })
+    if moon_course["void_of_course"]:
+        warnings.append({
+            "code": "void_moon",
+            "level": "caution",
+            "text_ko": "Moon(달)이 별자리를 떠나기 전 전통 7행성과 완성하는 주요 적용각이 없습니다.",
+        })
+    return warnings
+
+def compute_horary(
+    question_text: str,
+    question_iso: str,
+    topic: str = "general",
+    timezone_name: str = "Asia/Seoul",
+    place: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+):
+    question = str(question_text or "").strip()
+    if not question:
+        raise ValueError("호라리 질문 원문을 입력해야 합니다.")
+
+    latitude, longitude, resolved_place = resolve_coordinates(place, lat, lon)
+    local_dt, dt_utc = _horary_local_to_utc(question_iso, timezone_name)
+    houses = compute_regiomontanus_houses(dt_utc, latitude, longitude)
+    spec = HORARY_TOPIC_SPECS.get(topic, HORARY_TOPIC_SPECS["general"])
+
+    planets = {}
+    for body in HORARY_PLANETS:
+        lon_now, speed, direction = planet_motion(body, dt_utc)
+        sd = sign_data(lon_now)
+        dignity, dignity_ko = _horary_dignity(body, sd["sign_index"])
+        planets[body] = {
+            **sd,
+            "name_ko": PLANET_KO[body],
+            "house": cusp_house(lon_now, houses["cusps"]),
+            "speed_deg_per_day": round(float(speed), 6),
+            "direction": direction,
+            "retrograde": direction == "역행",
+            "dignity": dignity,
+            "dignity_ko": dignity_ko,
+        }
+
+    querent_ruler = _horary_ruler_for_cusp(houses["cusps"][0])
+    quesited_house = int(spec["quesited_house"])
+    quesited_ruler = _horary_ruler_for_cusp(houses["cusps"][quesited_house - 1])
+    event_house = spec.get("event_house")
+    event_ruler = (
+        _horary_ruler_for_cusp(houses["cusps"][int(event_house) - 1])
+        if event_house else None
+    )
+
+    primary_aspect = (
+        _horary_aspect_state(
+            querent_ruler, planets[querent_ruler],
+            quesited_ruler, planets[quesited_ruler],
+        )
+        if querent_ruler != quesited_ruler else None
+    )
+    perfection = _horary_perfection_candidate(
+        querent_ruler, planets[querent_ruler],
+        quesited_ruler, planets[quesited_ruler],
+        dt_utc, timezone_name,
+    )
+    reception = (
+        _horary_reception(
+            querent_ruler, planets[querent_ruler],
+            quesited_ruler, planets[quesited_ruler],
+        )
+        if querent_ruler != quesited_ruler else {
+            "a": querent_ruler,
+            "b": quesited_ruler,
+            "same_significator": True,
+            "has_reception": False,
+            "mutual_reception": False,
+        }
+    )
+    moon_course = _horary_moon_course(planets, dt_utc, timezone_name)
+    prohibitions = _horary_potential_prohibitions(
+        planets, querent_ruler, quesited_ruler, perfection
+    )
+
+    applying_aspects = []
+    for i, body_a in enumerate(HORARY_PLANETS):
+        for body_b in HORARY_PLANETS[i + 1:]:
+            record = _horary_aspect_state(
+                body_a, planets[body_a], body_b, planets[body_b]
+            )
+            if record["phase"] in {"applying", "exact"}:
+                applying_aspects.append(record)
+    applying_aspects.sort(key=lambda x: x["orb"])
+
+    warnings = _horary_warning_flags(houses, planets, moon_course)
+    if prohibitions:
+        warnings.append({
+            "code": "potential_intervention",
+            "level": "review",
+            "text_ko": "주 성사각보다 앞서는 잠재 개입각이 있습니다. 실제 금지·좌절 여부는 리셉션과 행성 상태를 함께 검토해야 합니다.",
+        })
+
+    _, _, _, _, target_keys, ephemeris_used, fallback_reason = load_ephemeris()
+    return {
+        "schema": "LUNEA_HORARY_V1",
+        "question": {
+            "text": question,
+            "topic": topic if topic in HORARY_TOPIC_SPECS else "general",
+            "topic_label_ko": spec["label_ko"],
+            "topic_note_ko": spec["note"],
+        },
+        "moment": {
+            "local_iso": local_dt.isoformat(),
+            "utc_iso": dt_utc.isoformat(),
+            "timezone": timezone_name,
+            "place_input": place,
+            "place_resolved": resolved_place,
+            "latitude": latitude,
+            "longitude": longitude,
+        },
+        "zodiac": "tropical",
+        "house_system": "regiomontanus",
+        "angles": {
+            "ASC": {**sign_data(houses["asc"]), "name_ko": "상승점"},
+            "MC": {**sign_data(houses["mc"]), "name_ko": "중천점"},
+        },
+        "cusps": [round(float(x), 6) for x in houses["cusps"]],
+        "planets": planets,
+        "significators": {
+            "querent": {
+                "house": 1,
+                "ruler": querent_ruler,
+                "ruler_ko": PLANET_KO[querent_ruler],
+                "planet": planets[querent_ruler],
+            },
+            "quesited": {
+                "house": quesited_house,
+                "ruler": quesited_ruler,
+                "ruler_ko": PLANET_KO[quesited_ruler],
+                "planet": planets[quesited_ruler],
+            },
+            "event": ({
+                "house": int(event_house),
+                "ruler": event_ruler,
+                "ruler_ko": PLANET_KO[event_ruler],
+                "planet": planets[event_ruler],
+            } if event_house else None),
+            "moon": planets["Moon"],
+        },
+        "judgment_support": {
+            "primary_connection": primary_aspect,
+            "perfection": perfection,
+            "reception": reception,
+            "moon_course": moon_course,
+            "potential_prohibition": prohibitions,
+            "warnings": warnings,
+            "applying_aspects": applying_aspects,
+        },
+        "meta": {
+            "ephemeris": ephemeris_used,
+            "ephemeris_fallback_reason": fallback_reason,
+            "planet_target_keys": {
+                k: v for k, v in target_keys.items() if k in HORARY_PLANETS
+            },
+            "calculation": "Skyfield apparent tropical longitude + Swiss Ephemeris Regiomontanus houses",
+            "interpretation_boundary": "Calculation evidence only; no deterministic event guarantee.",
+        },
+    }
 # ============================================================
 # LUNEA TRANSIT SCANNER V1
 # - Reuses deterministic Natal payload produced above.

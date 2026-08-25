@@ -5,11 +5,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from astro_core import compute_natal, scan_transits, calculate_return_context, calculate_thai_taksa, KOREA_BIRTHPLACES
+from astro_core import (
+    compute_natal,
+    compute_horary,
+    scan_transits,
+    calculate_return_context,
+    calculate_thai_taksa,
+    KOREA_BIRTHPLACES,
+)
 
 app = FastAPI(
     title="LUNEA Astro Core",
-    version="1.2.0",
+    version="1.3.0",
     description="Deterministic Western astrology calculation service for LUNEA."
 )
 
@@ -36,7 +43,15 @@ class NatalRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "LUNEA Astro Core", "version": "1.2.0", "transit_scan": True, "returns": True, "thai_taksa": True}
+    return {
+        "ok": True,
+        "service": "LUNEA Astro Core",
+        "version": "1.3.0",
+        "horary": True,
+        "transit_scan": True,
+        "returns": True,
+        "thai_taksa": True,
+    }
 
 @app.get("/v1/locations")
 def locations():
@@ -66,6 +81,36 @@ def natal(req: NatalRequest):
             status_code=500,
             detail=f"Natal 계산 실패: {type(exc).__name__}: {exc}"
         )
+
+class HoraryRequest(BaseModel):
+    question_text: str = Field(..., min_length=2)
+    question_iso: str = Field(..., examples=["2026-08-25T22:30"])
+    topic: str = Field(default="general")
+    timezone: str = Field(default="Asia/Seoul")
+    place: Optional[str] = Field(default=None, examples=["여수"])
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+@app.post("/v1/horary")
+def horary(req: HoraryRequest):
+    try:
+        return compute_horary(
+            question_text=req.question_text,
+            question_iso=req.question_iso,
+            topic=req.topic,
+            timezone_name=req.timezone,
+            place=req.place,
+            lat=req.lat,
+            lon=req.lon,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Horary 계산 실패: {type(exc).__name__}: {exc}"
+        )
+
 class TransitScanRequest(BaseModel):
     natal: dict
     topic: str = Field(default="general")
