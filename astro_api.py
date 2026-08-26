@@ -8,15 +8,15 @@ from pydantic import BaseModel, Field
 from astro_core import (
     compute_natal,
     compute_horary,
-    scan_transits,
     calculate_return_context,
     calculate_thai_taksa,
     KOREA_BIRTHPLACES,
 )
+from transit_extended import scan_transits_extended, MAX_TRANSIT_DAYS
 
 app = FastAPI(
     title="LUNEA Astro Core",
-    version="1.3.0",
+    version="1.4.0",
     description="Deterministic Western astrology calculation service for LUNEA."
 )
 
@@ -46,9 +46,10 @@ def health():
     return {
         "ok": True,
         "service": "LUNEA Astro Core",
-        "version": "1.3.0",
+        "version": "1.4.0",
         "horary": True,
         "transit_scan": True,
+        "transit_scan_max_days": MAX_TRANSIT_DAYS,
         "returns": True,
         "thai_taksa": True,
     }
@@ -115,13 +116,13 @@ class TransitScanRequest(BaseModel):
     natal: dict
     topic: str = Field(default="general")
     start_iso: Optional[str] = None
-    days: int = Field(default=30, ge=1, le=120)
+    days: int = Field(default=30, ge=1, le=MAX_TRANSIT_DAYS)
     timezone: str = Field(default="Asia/Seoul")
 
 @app.post("/v1/transits/scan")
 def transit_scan(req: TransitScanRequest):
     try:
-        return scan_transits(
+        return scan_transits_extended(
             natal=req.natal,
             topic=req.topic,
             start_iso=req.start_iso,
