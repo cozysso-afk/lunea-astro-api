@@ -7,16 +7,16 @@ from pydantic import BaseModel, Field
 
 from astro_core import (
     compute_natal,
-    compute_horary,
     calculate_return_context,
     calculate_thai_taksa,
     KOREA_BIRTHPLACES,
 )
+from horary_balance_v2 import compute_horary
 from transit_extended import scan_transits_extended, MAX_TRANSIT_DAYS
 
 app = FastAPI(
     title="LUNEA Astro Core",
-    version="1.4.0",
+    version="1.5.0",
     description="Deterministic Western astrology calculation service for LUNEA."
 )
 
@@ -46,8 +46,9 @@ def health():
     return {
         "ok": True,
         "service": "LUNEA Astro Core",
-        "version": "1.4.0",
+        "version": "1.5.0",
         "horary": True,
+        "horary_balance_v2": True,
         "transit_scan": True,
         "transit_scan_max_days": MAX_TRANSIT_DAYS,
         "returns": True,
