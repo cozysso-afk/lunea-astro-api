@@ -11,6 +11,7 @@ from astro_core import (
     calculate_thai_taksa,
     KOREA_BIRTHPLACES,
 )
+import horary_topic_routes_v3  # noqa: F401  # patches extra Horary house routes
 from horary_balance_v3 import compute_horary
 from transit_extended import scan_transits_extended, MAX_TRANSIT_DAYS
 
@@ -50,6 +51,7 @@ def health():
         "horary": True,
         "horary_balance_v3": True,
         "horary_balance_v2_compat": True,
+        "horary_topic_routes_v3": True,
         "transit_scan": True,
         "transit_scan_max_days": MAX_TRANSIT_DAYS,
         "returns": True,
