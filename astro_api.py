@@ -48,6 +48,7 @@ def health():
         "ok": True,
         "service": "LUNEA Astro Core",
         "version": "1.6.0",
+        "build": "horary-v3-20260902",
         "horary": True,
         "horary_balance_v3": True,
         "horary_balance_v2_compat": True,
