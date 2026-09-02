@@ -2,7 +2,7 @@ name: Test Horary Balance V3
 
 on:
   push:
-    branches: [feature/horary-balance-v3]
+    branches: [main, feature/horary-balance-v3]
   pull_request:
     branches: [main]
 
