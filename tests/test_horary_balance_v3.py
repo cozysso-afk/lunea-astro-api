@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -133,6 +134,28 @@ class HoraryBalanceV3Tests(unittest.TestCase):
         self.assertEqual(core.HORARY_TOPIC_SPECS["communication"]["quesited_house"], 3)
         self.assertEqual(core.HORARY_TOPIC_SPECS["contract"]["event_house"], 3)
         self.assertEqual(core.HORARY_TOPIC_SPECS["reconciliation"]["event_house"], 5)
+
+    def test_real_ephemeris_smoke(self):
+        started = time.perf_counter()
+        result = v3.compute_horary(
+            question_text="그 사람과 다시 대화를 시작하고 관계를 회복할 수 있을까요?",
+            question_iso="2026-09-02T08:30",
+            topic="reconciliation",
+            timezone_name="Asia/Seoul",
+            lat=37.5665,
+            lon=126.9780,
+        )
+        elapsed = time.perf_counter() - started
+        self.assertEqual(result["schema"], "LUNEA_HORARY_V1")
+        self.assertEqual(result["meta"]["horary_balance"], "LUNEA_HORARY_BALANCE_V3")
+        self.assertEqual(result["judgment_support"]["balance_v3"]["version"], "LUNEA_HORARY_BALANCE_V3")
+        self.assertEqual(result["significators"]["event"]["house"], 5)
+        self.assertIn(result["judgment_support"]["balance_v3"]["tier"], {
+            "direct_friction_supported", "direct_with_friction", "strong_support", "direct_support",
+            "secondary_support", "shared_ruler_open", "mixed_support", "open_indeterminate",
+            "blocked_direct", "weak_evidence",
+        })
+        print(f"real Horary V3 smoke: {elapsed:.3f}s · tier={result['judgment_support']['balance_v3']['tier']}")
 
 
 if __name__ == "__main__":
