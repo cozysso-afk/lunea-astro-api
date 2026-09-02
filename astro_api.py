@@ -12,12 +12,12 @@ from astro_core import (
     KOREA_BIRTHPLACES,
 )
 import horary_topic_routes_v3  # noqa: F401  # patches extra Horary house routes
-from horary_balance_v3 import compute_horary
+from horary_balance_v31 import compute_horary
 from transit_extended import scan_transits_extended, MAX_TRANSIT_DAYS
 
 app = FastAPI(
     title="LUNEA Astro Core",
-    version="1.6.0",
+    version="1.7.0",
     description="Deterministic Western astrology calculation service for LUNEA."
 )
 
@@ -47,10 +47,11 @@ def health():
     return {
         "ok": True,
         "service": "LUNEA Astro Core",
-        "version": "1.6.0",
-        "build": "horary-v3-20260902",
+        "version": "1.7.0",
+        "build": "horary-v3.1-20260902",
         "horary": True,
-        "horary_balance_v3": True,
+        "horary_balance_v31": True,
+        "horary_balance_v3_compat": True,
         "horary_balance_v2_compat": True,
         "horary_topic_routes_v3": True,
         "transit_scan": True,
