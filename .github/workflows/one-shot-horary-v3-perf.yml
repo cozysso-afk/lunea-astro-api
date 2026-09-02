@@ -73,16 +73,17 @@ jobs:
           if start_marker in src:
               start = src.index(start_marker)
               end = src.index(end_marker, start)
-              replacement = textwrap.dedent('''
-                  valid_times, valid_a, valid_b, sign_change_body = _sample_until_first_sign_change(
-                      body_a, row_a, body_b, row_b, dt_utc, horizon_days, step_hours
-                  )
-                  start_a_sign = int(float(row_a["longitude"]) // 30)
-                  start_b_sign = int(float(row_b["longitude"]) // 30)
-              ''').lstrip('\n')
+              replacement = (
+                  '    valid_times, valid_a, valid_b, sign_change_body = _sample_until_first_sign_change(\n'
+                  '        body_a, row_a, body_b, row_b, dt_utc, horizon_days, step_hours\n'
+                  '    )\n'
+                  '    start_a_sign = int(float(row_a["longitude"]) // 30)\n'
+                  '    start_b_sign = int(float(row_b["longitude"]) // 30)\n'
+              )
               src = src[:start] + replacement + src[end:]
 
           path.write_text(src, encoding='utf-8')
+          python_compile = compile(src, 'horary_balance_v3.py', 'exec')
           if workflow.exists():
               workflow.unlink()
           PY
