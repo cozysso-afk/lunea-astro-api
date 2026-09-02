@@ -89,6 +89,42 @@ def _first_sign_change_cut(a_lons, b_lons, row_a, row_b):
     return cut, sign_change_body
 
 
+
+def _sample_until_first_sign_change(body_a, row_a, body_b, row_b, dt_utc, horizon_days, step_hours):
+    """Sample in chunks and stop as soon as either significator leaves its sign."""
+    end_dt = dt_utc + timedelta(days=float(horizon_days))
+    max_speed = max(
+        abs(float(row_a.get("speed_deg_per_day") or 0.0)),
+        abs(float(row_b.get("speed_deg_per_day") or 0.0)),
+    )
+    chunk_days = 3.0 if "Moon" in {body_a, body_b} else 10.0 if max_speed >= 0.45 else 30.0
+    start_a_sign = int(float(row_a["longitude"]) // 30)
+    start_b_sign = int(float(row_b["longitude"]) // 30)
+    all_times, all_a, all_b = [], [], []
+    cursor = dt_utc
+
+    while cursor < end_dt:
+        chunk_end = min(end_dt, cursor + timedelta(days=chunk_days))
+        chunk_times = list(core._sample_datetimes(cursor, chunk_end, step_hours))
+        if all_times and chunk_times and chunk_times[0] == all_times[-1]:
+            chunk_times = chunk_times[1:]
+        if not chunk_times:
+            break
+        a_chunk = np.asarray(core.get_tropical_ecliptic_lons(body_a, chunk_times), dtype=float)
+        b_chunk = np.asarray(core.get_tropical_ecliptic_lons(body_b, chunk_times), dtype=float)
+        for t, a_lon, b_lon in zip(chunk_times, a_chunk, b_chunk):
+            if int(float(a_lon) // 30) != start_a_sign:
+                return all_times, np.asarray(all_a, dtype=float), np.asarray(all_b, dtype=float), body_a
+            if int(float(b_lon) // 30) != start_b_sign:
+                return all_times, np.asarray(all_a, dtype=float), np.asarray(all_b, dtype=float), body_b
+            all_times.append(t)
+            all_a.append(float(a_lon))
+            all_b.append(float(b_lon))
+        cursor = chunk_end
+
+    return all_times, np.asarray(all_a, dtype=float), np.asarray(all_b, dtype=float), None
+
+
 def _balanced_perfection_candidate(body_a, row_a, body_b, row_b, dt_utc, timezone_name):
     if body_a == body_b:
         return {
@@ -143,19 +179,11 @@ def _balanced_perfection_candidate(body_a, row_a, body_b, row_b, dt_utc, timezon
     else:
         step_hours = 8.0
 
-    times = core._sample_datetimes(dt_utc, dt_utc + timedelta(days=horizon_days), step_hours)
-    a_lons = np.asarray(core.get_tropical_ecliptic_lons(body_a, times), dtype=float)
-    b_lons = np.asarray(core.get_tropical_ecliptic_lons(body_b, times), dtype=float)
-
-    cut, changed_side = _first_sign_change_cut(a_lons, b_lons, row_a, row_b)
+    valid_times, valid_a, valid_b, sign_change_body = _sample_until_first_sign_change(
+        body_a, row_a, body_b, row_b, dt_utc, horizon_days, step_hours
+    )
     start_a_sign = int(float(row_a["longitude"]) // 30)
     start_b_sign = int(float(row_b["longitude"]) // 30)
-    sign_change_body = body_a if changed_side == "a" else body_b if changed_side == "b" else None
-
-    valid_count = max(1, cut)
-    valid_times = times[:valid_count]
-    valid_a = a_lons[:valid_count]
-    valid_b = b_lons[:valid_count]
     if len(valid_times) < 2:
         return {
             "perfects": False,
