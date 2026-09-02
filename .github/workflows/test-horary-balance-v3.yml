@@ -21,3 +21,5 @@ jobs:
         run: python -m py_compile astro_api.py astro_core.py horary_balance_v3.py horary_topic_routes_v3.py
       - name: Horary V3 regression tests
         run: python -m unittest -v tests.test_horary_balance_v3
+      - name: Render Docker image smoke build
+        run: docker build --tag lunea-astro-api:ci .
