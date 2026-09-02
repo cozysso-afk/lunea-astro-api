@@ -2,7 +2,7 @@ name: Test Horary Balance V3
 
 on:
   push:
-    branches: [main, feature/horary-balance-v3, feat/horary-balance-v3-1]
+    branches: [main, feature/horary-balance-v3, feat/horary-balance-v3-1, feat/thai-taksa-range-v18]
   pull_request:
     branches: [main]
 
@@ -23,5 +23,7 @@ jobs:
         run: python -m unittest -v tests.test_horary_balance_v3
       - name: Horary V3.1 traditional-pattern tests
         run: python -m unittest -v tests.test_horary_balance_v31
+      - name: Thai Taksa range calendar tests
+        run: python -m unittest -v tests.test_thai_taksa_range
       - name: Render Docker image smoke build
         run: docker build --tag lunea-astro-api:ci .
