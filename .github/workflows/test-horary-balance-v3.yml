@@ -31,6 +31,8 @@ jobs:
         run: python -m unittest -v tests.test_horary_engine_v6
       - name: Horary V7 bias/dignity/Moon/route tests
         run: python -m unittest -v tests.test_horary_engine_v7
+      - name: Real ephemeris translation/collection/intervention goldens
+        run: python -m unittest -v tests.test_horary_patterns_real_v7
       - name: Thai Taksa range calendar tests
         run: python -m unittest -v tests.test_thai_taksa_range
       - name: Render Docker image smoke build
