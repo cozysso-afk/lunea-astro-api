@@ -44,8 +44,6 @@ def remap_pair(data: dict, querent: str, quesited: str) -> dict:
 
 class HoraryRealPatternGoldensV7(unittest.TestCase):
     def test_real_translation_of_light_golden(self):
-        # 2026-01-03 00:00 KST. Real ephemeris: Moon separates from Saturn
-        # and applies to Sun, satisfying the V3.1 translation sequence.
         data = remap_pair(base_chart("2026-01-03T00:00:00+09:00"), "Sun", "Saturn")
         rows = v31._translation_candidates(data, TZ)
         self.assertTrue(rows)
@@ -60,7 +58,6 @@ class HoraryRealPatternGoldensV7(unittest.TestCase):
         self.assertTrue(first["applying_perfection"]["perfects"])
 
     def test_real_collection_of_light_golden(self):
-        # 2026-01-01 12:00 KST. Sun and Venus both apply to slower Mars.
         data = remap_pair(base_chart("2026-01-01T12:00:00+09:00"), "Sun", "Venus")
         rows = v31._collection_candidates(data, TZ)
         self.assertTrue(rows)
@@ -72,8 +69,6 @@ class HoraryRealPatternGoldensV7(unittest.TestCase):
         self.assertLessEqual(max(mars["days_to_querent_contact"], mars["days_to_quesited_contact"]), 60.0)
 
     def test_real_prohibition_golden(self):
-        # 2026-01-01 12:00 KST. Sun -> Mars is a real direct perfection,
-        # but faster Venus reaches Mars first: confirmed prohibition.
         data = remap_pair(base_chart("2026-01-01T12:00:00+09:00"), "Sun", "Mars")
         self.assertTrue(data["judgment_support"]["perfection"]["perfects"])
         rows = v31._confirmed_interventions(data, TZ)
@@ -84,8 +79,6 @@ class HoraryRealPatternGoldensV7(unittest.TestCase):
         self.assertGreater(prohibition["days_before_main"], 0.0)
 
     def test_real_frustration_golden(self):
-        # 2026-01-10 00:00 KST. Moon -> Sun direct perfection exists, while
-        # the target Sun completes to slower Jupiter first: frustration.
         data = remap_pair(base_chart("2026-01-10T00:00:00+09:00"), "Sun", "Moon")
         self.assertTrue(data["judgment_support"]["perfection"]["perfects"])
         rows = v31._confirmed_interventions(data, TZ)
@@ -95,10 +88,26 @@ class HoraryRealPatternGoldensV7(unittest.TestCase):
         self.assertEqual(frustration["classification"], "confirmed_pattern")
         self.assertGreater(frustration["days_before_main"], 0.0)
 
+    def test_real_sign_ingress_interruption_is_not_refranation(self):
+        # 2026-01-02 12:00 KST. Moon/Mercury are within-moiety applying
+        # opposition, but Moon changes sign before exact perfection. This must
+        # be an ingress interruption, not a station-based Refranation.
+        data = base_chart("2026-01-02T12:00:00+09:00")
+        dt_utc = datetime.fromisoformat(data["moment"]["utc_iso"].replace("Z", "+00:00"))
+        moon = data["planets"]["Moon"]
+        mercury = data["planets"]["Mercury"]
+        state = v6._strict_aspect_state("Moon", moon, "Mercury", mercury)
+        self.assertTrue(state["within_orb"])
+        self.assertEqual(state["traditional_valid_aspect"], "opposition")
+        self.assertEqual(state["phase"], "applying")
+
+        p = v6._strict_perfection_candidate("Moon", moon, "Mercury", mercury, dt_utc, TZ)
+        self.assertFalse(p["perfects"])
+        self.assertEqual(p["reason"], "sign_change_before_perfection")
+        self.assertEqual(p["interruption_type"], "sign_ingress")
+        self.assertFalse(p["is_refranation"])
+
     def test_real_station_refranation_golden(self):
-        # 2026-10-23 04:12:48 KST. Mercury/Jupiter are within-moiety applying
-        # square, but Mercury stations before the exact aspect and the error
-        # turns away; V6 must classify the interruption as Refranation.
         data = base_chart("2026-10-23T04:12:48+09:00")
         dt_utc = datetime.fromisoformat(data["moment"]["utc_iso"].replace("Z", "+00:00"))
         mercury = data["planets"]["Mercury"]
