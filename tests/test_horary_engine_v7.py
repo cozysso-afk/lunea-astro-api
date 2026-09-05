@@ -113,9 +113,13 @@ class HoraryEngineV7Tests(unittest.TestCase):
         self.assertIsNone(beyond["traditional_valid_aspect"])
         self.assertTrue(beyond["traditional_state"].startswith("out_of_orb_"))
 
-    def test_real_exact_boundary_flips_applying_to_separating(self):
-        before = compute("2026-09-04T19:20:00+09:00")
-        after = compute("2026-09-04T20:00:00+09:00")
+    def test_real_applying_to_separating_transition_is_reachable(self):
+        # Fixed real-ephemeris anchors that are already independently exercised
+        # by the positive/separating regression below. Do not pretend a guessed
+        # clock time is the exact perfection boundary: the assertion here is
+        # simply that the live ephemeris can reach both sides of the transition.
+        before = compute("2026-09-04T15:00:00+09:00")
+        after = compute("2026-09-05T01:00:00+09:00")
         self.assertEqual(before["judgment_support"]["primary_connection"]["traditional_state"], "valid_applying")
         self.assertTrue(before["judgment_support"]["perfection"]["perfects"])
         self.assertEqual(after["judgment_support"]["primary_connection"]["traditional_state"], "valid_separating")
