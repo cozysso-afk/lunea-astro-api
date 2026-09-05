@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import swisseph as swe
 
 import astro_core as core
-import horary_topic_routes_v3  # noqa: F401  # activates V4 + Engine V5
+import horary_topic_routes_v3  # noqa: F401  # activates V4 + V5 + strict V6 chain
 import horary_balance_v31 as v31
 
 
@@ -34,11 +34,11 @@ def swiss_lon_speed(body, dt_utc):
 
 class HoraryEngineV5Tests(unittest.TestCase):
     def test_planetary_moiety_orbs_replace_aspect_type_limits(self):
-        # Lilly-style full orbs -> half-orb moieties; pair limit is their sum.
+        # V5 owns the Lilly-style moiety policy even though production output is
+        # wrapped by V6. Pair limit is the sum of the two planetary moieties.
         self.assertAlmostEqual(core._horary_aspect_limit("Sun", "Moon", "square"), 13.75, places=6)
         self.assertAlmostEqual(core._horary_aspect_limit("Mercury", "Venus", "sextile"), 7.0, places=6)
         self.assertAlmostEqual(core._horary_aspect_limit("Mars", "Saturn", "opposition"), 8.25, places=6)
-        # The same planet pair has the same traditional orb for every Ptolemaic aspect.
         self.assertAlmostEqual(
             core._horary_aspect_limit("Moon", "Saturn", "trine"),
             core._horary_aspect_limit("Moon", "Saturn", "conjunction"),
@@ -55,18 +55,17 @@ class HoraryEngineV5Tests(unittest.TestCase):
         )
 
         self.assertEqual(result["moment"]["utc_iso"], "2026-09-04T22:07:00+00:00")
-        # Swiss Ephemeris Regiomontanus reference for Yeosu at the actual UTC instant.
         self.assertAlmostEqual(result["angles"]["ASC"]["longitude"], 174.515708, places=3)
         self.assertAlmostEqual(result["angles"]["MC"]["longitude"], 83.989000, places=3)
         self.assertAlmostEqual(result["cusps"][0], 174.515708, places=3)
         self.assertAlmostEqual(result["cusps"][9], 83.989000, places=3)
 
-        # Swiss-reference longitudes at 2026-09-04 22:07 UTC. These values are
-        # intentionally far from the erroneous 07:07-UTC chart (~9 h later).
         self.assertLess(angular_error(result["planets"]["Sun"]["longitude"], 162.390095), 0.12)
         self.assertLess(angular_error(result["planets"]["Moon"]["longitude"], 80.259002), 0.12)
 
-        self.assertEqual(result["meta"]["horary_engine"], "LUNEA_HORARY_ENGINE_V5_MOIETY_SECT")
+        # Production is now V6, while V5's moiety/sect policies remain visible
+        # in metadata and must survive the wrapper chain.
+        self.assertEqual(result["meta"]["horary_engine"], "LUNEA_HORARY_ENGINE_V6_STRICT_TRADITIONAL_CORE")
         self.assertEqual(result["meta"]["aspect_orb_policy"]["method"], "planetary_moiety_sum")
         self.assertFalse(result["meta"]["sect"]["fallback"])
 
@@ -100,8 +99,6 @@ class HoraryEngineV5Tests(unittest.TestCase):
 
     def test_skyfield_vs_swiss_ephemeris_golden_grid(self):
         # Independent ephemeris cross-check over multiple seasons/years.
-        # 0.12° longitude tolerance is tight enough to catch timezone/date shifts
-        # while allowing small apparent-frame/ephemeris implementation differences.
         epochs = [
             datetime(2025, 1, 15, 0, 0, tzinfo=UTC),
             datetime(2025, 4, 2, 6, 30, tzinfo=UTC),
@@ -129,7 +126,6 @@ class HoraryEngineV5Tests(unittest.TestCase):
                         speed_tol,
                         f"{body} speed mismatch at {dt.isoformat()}",
                     )
-                    # Do not demand a direction label at an actual station.
                     if abs(swiss_speed) >= 0.03:
                         expected = "순행" if swiss_speed > 0 else "역행"
                         self.assertEqual(sky_direction, expected)
