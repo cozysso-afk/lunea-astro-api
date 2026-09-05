@@ -68,8 +68,6 @@ def _sect_evidence(data):
             "fallback": False,
         }
     except Exception as exc:
-        # Defensive compatibility fallback only. Normal API payloads include
-        # utc/latitude/longitude, so production should use altitude.
         try:
             fallback_day = bool(_ORIGINAL_IS_DAY_CHART(data))
         except Exception:
@@ -131,8 +129,6 @@ def _compute_horary_v5(*args, **kwargs):
     return data
 
 
-# Patch before any actual question calculation occurs. v31's runtime global
-# lookup of _is_day_chart therefore uses the altitude-based implementation.
 core._horary_aspect_limit = _moiety_aspect_limit
 v31._is_day_chart = _is_day_chart_altitude
 
@@ -140,5 +136,7 @@ if not getattr(v31.compute_horary, "_lunea_engine_v5", False):
     _compute_horary_v5._lunea_engine_v5 = True
     v31.compute_horary = _compute_horary_v5
 
-# V6 must load after V5 has installed moiety-orb and sect policies.
+# V6 installs the strict aspect/perfection gate. V7 then wraps the completed
+# V6 payload with dignity, Moon-relevance, obstruction and bias guards.
 import horary_engine_v6  # noqa: F401,E402
+import horary_engine_v7  # noqa: F401,E402
