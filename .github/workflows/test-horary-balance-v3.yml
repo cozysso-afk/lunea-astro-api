@@ -2,7 +2,7 @@ name: Test Horary Balance V3
 
 on:
   push:
-    branches: [main, feature/horary-balance-v3, feat/horary-balance-v3-1, feat/thai-taksa-range-v18]
+    branches: [main, feature/horary-balance-v3, feat/horary-balance-v3-1, feat/thai-taksa-range-v18, fix/horary-engine-moiety-sect-golden-20260905]
   pull_request:
     branches: [main]
 
@@ -18,13 +18,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Syntax check
-        run: python -m py_compile astro_api.py astro_core.py horary_balance_v3.py horary_balance_v31.py horary_topic_routes_v3.py
+        run: python -m py_compile astro_api.py astro_core.py horary_balance_v3.py horary_balance_v31.py horary_topic_routes_v3.py horary_engine_v5.py
       - name: Horary V3 regression tests
         run: python -m unittest -v tests.test_horary_balance_v3
       - name: Horary V3.1 traditional-pattern tests
         run: python -m unittest -v tests.test_horary_balance_v31
       - name: Horary V4 condition/location enrichment tests
         run: python -m unittest -v tests.test_horary_enrichment_v4
+      - name: Horary V5 moiety/sect/golden ephemeris tests
+        run: python -m unittest -v tests.test_horary_engine_v5
       - name: Thai Taksa range calendar tests
         run: python -m unittest -v tests.test_thai_taksa_range
       - name: Render Docker image smoke build
