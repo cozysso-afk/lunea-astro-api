@@ -27,12 +27,7 @@ def compute(question_iso: str, *, topic: str = "general", question: str = "이 �
 
 class HoraryEngineV7Tests(unittest.TestCase):
     def test_minor_dignity_prevents_false_peregrine_display(self):
-        row = {
-            "longitude": 250.0,
-            "sign_index": 8,
-            "dignity": "peregrine",
-            "dignity_ko": "무권위·페레그린",
-        }
+        row = {"longitude": 250.0, "sign_index": 8, "dignity": "peregrine", "dignity_ko": "무권위·페레그린"}
         profile = v7._essential_profile("Sun", row, True)
         self.assertIn("triplicity", profile["held_dignities"])
         self.assertEqual(profile["classification"], "minor_dignity")
@@ -40,14 +35,7 @@ class HoraryEngineV7Tests(unittest.TestCase):
         self.assertGreater(profile["score"], 0)
 
     def test_dignity_and_debility_can_coexist_without_bias(self):
-        # Saturn in late Aries is in fall, while Egyptian terms can still give
-        # Saturn a minor dignity. V7 must preserve both facts, not choose one.
-        row = {
-            "longitude": 27.0,
-            "sign_index": 0,
-            "dignity": "fall",
-            "dignity_ko": "추락",
-        }
+        row = {"longitude": 27.0, "sign_index": 0, "dignity": "fall", "dignity_ko": "추락"}
         profile = v7._essential_profile("Saturn", row, True)
         self.assertIn("term", profile["held_dignities"])
         self.assertIn("fall", profile["debilities"])
@@ -66,9 +54,7 @@ class HoraryEngineV7Tests(unittest.TestCase):
             "judgment_support": {
                 "moon_course": {
                     "void_of_course": False,
-                    "next_major_applying_aspect": {
-                        "body": "Venus", "body_ko": "금성", "aspect": "trine", "aspect_ko": "삼분위"
-                    },
+                    "next_major_applying_aspect": {"body": "Venus", "body_ko": "금성", "aspect": "trine", "aspect_ko": "삼분위"},
                 }
             },
         }
@@ -98,9 +84,7 @@ class HoraryEngineV7Tests(unittest.TestCase):
                         "aspect_state": {"traditional_valid_aspect": "sextile", "aspect": "sextile"},
                     },
                     "interventions": {
-                        "prohibition_or_frustration": [
-                            {"type": "prohibition", "classification": "confirmed_pattern"}
-                        ],
+                        "prohibition_or_frustration": [{"type": "prohibition", "classification": "confirmed_pattern"}],
                         "refranation": None,
                     },
                     "staged_judgment": {"direct_perfection": "있음", "overall_ko": "직접 성사"},
@@ -128,6 +112,18 @@ class HoraryEngineV7Tests(unittest.TestCase):
         self.assertFalse(beyond["within_orb"])
         self.assertIsNone(beyond["traditional_valid_aspect"])
         self.assertTrue(beyond["traditional_state"].startswith("out_of_orb_"))
+
+    def test_real_exact_boundary_flips_applying_to_separating(self):
+        # Saturn/Moon sextile perfects around the evening of 2026-09-04 KST.
+        # Pin two points safely on opposite sides of exactness so a future
+        # regression cannot label both sides applying (or both separating).
+        before = compute("2026-09-04T19:20:00+09:00")
+        after = compute("2026-09-04T20:00:00+09:00")
+        self.assertEqual(before["judgment_support"]["primary_connection"]["traditional_state"], "valid_applying")
+        self.assertTrue(before["judgment_support"]["perfection"]["perfects"])
+        self.assertEqual(after["judgment_support"]["primary_connection"]["traditional_state"], "valid_separating")
+        self.assertFalse(after["judgment_support"]["perfection"]["perfects"])
+        self.assertEqual(after["judgment_support"]["perfection"]["reason"], "no_valid_applying_aspect")
 
     def test_topic_route_contracts_are_valid_and_match_real_payloads(self):
         for topic, spec in core.HORARY_TOPIC_SPECS.items():
