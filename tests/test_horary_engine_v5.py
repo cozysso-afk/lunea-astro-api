@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import swisseph as swe
 
 import astro_core as core
-import horary_topic_routes_v3  # noqa: F401  # activates V4 + V5 + strict V6 chain
+import horary_topic_routes_v3  # noqa: F401  # activates V4 + V5 + V6 + V7 chain
 import horary_balance_v31 as v31
 
 
@@ -34,8 +34,6 @@ def swiss_lon_speed(body, dt_utc):
 
 class HoraryEngineV5Tests(unittest.TestCase):
     def test_planetary_moiety_orbs_replace_aspect_type_limits(self):
-        # V5 owns the Lilly-style moiety policy even though production output is
-        # wrapped by V6. Pair limit is the sum of the two planetary moieties.
         self.assertAlmostEqual(core._horary_aspect_limit("Sun", "Moon", "square"), 13.75, places=6)
         self.assertAlmostEqual(core._horary_aspect_limit("Mercury", "Venus", "sextile"), 7.0, places=6)
         self.assertAlmostEqual(core._horary_aspect_limit("Mars", "Saturn", "opposition"), 8.25, places=6)
@@ -63,9 +61,7 @@ class HoraryEngineV5Tests(unittest.TestCase):
         self.assertLess(angular_error(result["planets"]["Sun"]["longitude"], 162.390095), 0.12)
         self.assertLess(angular_error(result["planets"]["Moon"]["longitude"], 80.259002), 0.12)
 
-        # Production is now V6, while V5's moiety/sect policies remain visible
-        # in metadata and must survive the wrapper chain.
-        self.assertEqual(result["meta"]["horary_engine"], "LUNEA_HORARY_ENGINE_V6_STRICT_TRADITIONAL_CORE")
+        self.assertEqual(result["meta"]["horary_engine"], "LUNEA_HORARY_ENGINE_V7_BALANCE_GUARDS")
         self.assertEqual(result["meta"]["aspect_orb_policy"]["method"], "planetary_moiety_sum")
         self.assertFalse(result["meta"]["sect"]["fallback"])
 
@@ -98,7 +94,6 @@ class HoraryEngineV5Tests(unittest.TestCase):
         )
 
     def test_skyfield_vs_swiss_ephemeris_golden_grid(self):
-        # Independent ephemeris cross-check over multiple seasons/years.
         epochs = [
             datetime(2025, 1, 15, 0, 0, tzinfo=UTC),
             datetime(2025, 4, 2, 6, 30, tzinfo=UTC),
