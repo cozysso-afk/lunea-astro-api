@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Syntax check
-        run: python -m py_compile astro_api.py astro_core.py horary_balance_v3.py horary_balance_v31.py horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py
+        run: python -m py_compile astro_api.py astro_core.py horary_balance_v3.py horary_balance_v31.py horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py
       - name: Horary V3 regression tests
         run: python -m unittest -v tests.test_horary_balance_v3
       - name: Horary V3.1 traditional-pattern tests
@@ -29,6 +29,8 @@ jobs:
         run: python -m unittest -v tests.test_horary_engine_v5
       - name: Horary V6 strict traditional-core tests
         run: python -m unittest -v tests.test_horary_engine_v6
+      - name: Horary V7 bias/dignity/Moon/route tests
+        run: python -m unittest -v tests.test_horary_engine_v7
       - name: Thai Taksa range calendar tests
         run: python -m unittest -v tests.test_thai_taksa_range
       - name: Render Docker image smoke build
