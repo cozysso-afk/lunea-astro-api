@@ -195,3 +195,7 @@ try:
 except Exception:
     # Keep import-time resilience; the normal CI/runtime import path should patch.
     pass
+
+# Final calculation-policy hardening: planetary moiety orbs + solar-altitude sect.
+# Imported after V4 wrapping so Engine V5 can wrap the complete payload chain.
+import horary_engine_v5  # noqa: F401,E402
