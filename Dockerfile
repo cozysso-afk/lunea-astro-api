@@ -92,10 +92,10 @@ assert 'question_relevant' in soft['judgment_support']['moon_relevance_v7']
 print('Horary V7 deployment sentinels OK: negative / soft-positive / hard-positive / separating / Moon relevance / dignity')
 PY
 
-# Production builds also execute the real-ephemeris Translation / Collection /
-# Prohibition / Frustration / station-Refranation goldens. A regression here
-# blocks the Render image instead of silently shipping a biased Horary engine.
-RUN python -m unittest -v tests.test_horary_patterns_real_v7
+# Production builds execute the V7 bias/route/boundary suite and real-ephemeris
+# Translation / Collection / Prohibition / Frustration / station-Refranation
+# goldens. Any regression blocks the Render image.
+RUN python -m unittest -v tests.test_horary_engine_v7 tests.test_horary_patterns_real_v7
 
 ENV PORT=10000
 EXPOSE 10000
