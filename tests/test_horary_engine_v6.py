@@ -14,6 +14,18 @@ LAT = 34.7594
 LON = 127.6530
 
 
+def compute(question_iso: str, topic: str = "contact", question: str = QUESTION):
+    return v31.compute_horary(
+        question_text=question,
+        question_iso=question_iso,
+        topic=topic,
+        timezone_name="Asia/Seoul",
+        place="현재 위치",
+        lat=LAT,
+        lon=LON,
+    )
+
+
 class HoraryEngineV6Tests(unittest.TestCase):
     def test_out_of_orb_geometric_aspect_never_enters_perfection(self):
         saturn = {
@@ -79,15 +91,7 @@ class HoraryEngineV6Tests(unittest.TestCase):
             self.assertAlmostEqual(got, want, places=5)
 
     def test_contact_fixture_strict_traditional_contract(self):
-        data = v31.compute_horary(
-            question_text=QUESTION,
-            question_iso="2026-09-05T18:11:00+09:00",
-            topic="contact",
-            timezone_name="Asia/Seoul",
-            place="현재 위치",
-            lat=LAT,
-            lon=LON,
-        )
+        data = compute("2026-09-05T18:11:00+09:00")
         self.assertEqual(data["meta"]["horary_engine"], v6.VERSION)
         self.assertEqual(data["house_system"], "regiomontanus")
         self.assertEqual(data["meta"]["aspect_orb_policy"]["method"], "planetary_moiety_sum")
@@ -142,6 +146,58 @@ class HoraryEngineV6Tests(unittest.TestCase):
         modern = j["modern_supplemental_v6"]
         self.assertFalse(modern["used_in_traditional_core"])
         self.assertTrue(modern["excluded_from_voc_perfection_translation_collection_reception"])
+
+    def test_real_soft_applying_perfection_reaches_positive_A_grade(self):
+        # 2026-09-04 15:00 KST: Capricorn ASC -> Saturn/Moon 1H-7H pair.
+        # Moon is inside the Saturn-Moon moiety orb and applies to sextile,
+        # perfecting before the Moon leaves Gemini. This is a real ephemeris
+        # positive sentinel so the engine cannot silently become "always NO".
+        data = compute(
+            "2026-09-04T15:00:00+09:00",
+            topic="general",
+            question="이 일은 실제로 성사될까요?",
+        )
+        j = data["judgment_support"]
+        p = j["perfection"]
+        self.assertTrue(p["perfects"])
+        self.assertTrue(p["perfection_check_started"])
+        self.assertTrue(p["started_within_orb"])
+        self.assertEqual((p.get("aspect") or {}).get("traditional_valid_aspect"), "sextile")
+        self.assertEqual((p.get("aspect") or {}).get("traditional_state"), "valid_applying")
+        self.assertEqual(j["traditional_core_v6"]["evidence_grade"], "A")
+
+    def test_real_hard_applying_perfection_is_not_automatic_no(self):
+        # 2026-09-06 15:00 KST: the same Saturn/Moon relationship is an
+        # applying square inside moiety orb. A hard aspect may indicate
+        # friction, but an exact perfection must remain a direct A-grade fact.
+        data = compute(
+            "2026-09-06T15:00:00+09:00",
+            topic="general",
+            question="어려움이 있어도 이 일은 성사될까요?",
+        )
+        j = data["judgment_support"]
+        p = j["perfection"]
+        self.assertTrue(p["perfects"])
+        self.assertEqual((p.get("aspect") or {}).get("traditional_valid_aspect"), "square")
+        self.assertEqual((p.get("aspect") or {}).get("traditional_state"), "valid_applying")
+        self.assertEqual(j["traditional_core_v6"]["evidence_grade"], "A")
+
+    def test_real_within_orb_separating_aspect_does_not_become_perfection(self):
+        # 2026-09-05 01:00 KST: Moon/Saturn sextile is still within moiety
+        # but already separating. This catches the opposite failure mode:
+        # within-orb geometry alone must not create active perfection.
+        data = compute(
+            "2026-09-05T01:00:00+09:00",
+            topic="general",
+            question="이미 지나간 흐름이 다시 성사각으로 잡히나요?",
+        )
+        j = data["judgment_support"]
+        state = j["primary_connection"]
+        self.assertTrue(state["within_orb"])
+        self.assertEqual(state["traditional_state"], "valid_separating")
+        self.assertFalse(j["perfection"]["perfects"])
+        self.assertEqual(j["perfection"]["reason"], "no_valid_applying_aspect")
+        self.assertNotEqual(j["traditional_core_v6"]["evidence_grade"], "A")
 
 
 if __name__ == "__main__":
