@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timezone
 
 import astro_core as core
-import horary_topic_routes_v3  # noqa: F401  # installs V4 -> V5 -> V6 chain
+import horary_topic_routes_v3  # noqa: F401  # installs V4 -> V5 -> V6 -> V7 chain
 import horary_balance_v31 as v31
 import horary_engine_v6 as v6
 
@@ -28,16 +28,8 @@ def compute(question_iso: str, topic: str = "contact", question: str = QUESTION)
 
 class HoraryEngineV6Tests(unittest.TestCase):
     def test_out_of_orb_geometric_aspect_never_enters_perfection(self):
-        saturn = {
-            "longitude": 0.0,
-            "speed_deg_per_day": 0.1,
-            "sign_index": 0,
-        }
-        sun = {
-            "longitude": 149.4144,
-            "speed_deg_per_day": 1.0,
-            "sign_index": 4,
-        }
+        saturn = {"longitude": 0.0, "speed_deg_per_day": 0.1, "sign_index": 0}
+        sun = {"longitude": 149.4144, "speed_deg_per_day": 1.0, "sign_index": 4}
         state = v6._strict_aspect_state("Saturn", saturn, "Sun", sun)
         self.assertEqual(state["closest_geometric_aspect"]["aspect"], "trine")
         self.assertAlmostEqual(state["closest_geometric_aspect"]["orb"], 29.4144, places=3)
@@ -46,10 +38,7 @@ class HoraryEngineV6Tests(unittest.TestCase):
         self.assertTrue(state["traditional_state"].startswith("out_of_orb_"))
 
         result = v6._strict_perfection_candidate(
-            "Saturn",
-            saturn,
-            "Sun",
-            sun,
+            "Saturn", saturn, "Sun", sun,
             datetime(2026, 9, 5, 9, 11, tzinfo=timezone.utc),
             "Asia/Seoul",
         )
@@ -74,25 +63,18 @@ class HoraryEngineV6Tests(unittest.TestCase):
         self.assertAlmostEqual(houses["asc"], 329.59002342674495, places=5)
         self.assertAlmostEqual(houses["mc"], 251.43868360169552, places=5)
         expected = [
-            329.59002342674495,
-            14.49791908365267,
-            48.58110687553263,
-            71.43868360169552,
-            91.14563161134907,
-            114.48924531192904,
-            149.59002342674495,
-            194.49791908365268,
-            228.58110687553264,
-            251.43868360169552,
-            271.1456316113491,
-            294.48924531192904,
+            329.59002342674495, 14.49791908365267, 48.58110687553263,
+            71.43868360169552, 91.14563161134907, 114.48924531192904,
+            149.59002342674495, 194.49791908365268, 228.58110687553264,
+            251.43868360169552, 271.1456316113491, 294.48924531192904,
         ]
         for got, want in zip(houses["cusps"], expected):
             self.assertAlmostEqual(got, want, places=5)
 
     def test_contact_fixture_strict_traditional_contract(self):
         data = compute("2026-09-05T18:11:00+09:00")
-        self.assertEqual(data["meta"]["horary_engine"], v6.VERSION)
+        self.assertEqual(data["meta"]["horary_engine"], "LUNEA_HORARY_ENGINE_V7_BALANCE_GUARDS")
+        self.assertEqual(data["judgment_support"]["traditional_core_v6"]["version"], v6.VERSION)
         self.assertEqual(data["house_system"], "regiomontanus")
         self.assertEqual(data["meta"]["aspect_orb_policy"]["method"], "planetary_moiety_sum")
         self.assertEqual(data["moment"]["local_iso"], "2026-09-05T18:11:00+09:00")
@@ -121,10 +103,7 @@ class HoraryEngineV6Tests(unittest.TestCase):
         self.assertTrue(moon["void_of_course"])
         self.assertIsNone(moon["next_major_applying_aspect"])
         self.assertFalse(moon["next_applying_before_sign_change"])
-        self.assertEqual(
-            moon["policy"],
-            "traditional_7_planets_ptolemaic_aspects_before_moon_sign_ingress",
-        )
+        self.assertEqual(moon["policy"], "traditional_7_planets_ptolemaic_aspects_before_moon_sign_ingress")
         self.assertFalse(moon["outer_planets_included"])
 
         warning_codes = {row["code"] for row in j["warnings"]}
@@ -148,13 +127,8 @@ class HoraryEngineV6Tests(unittest.TestCase):
         self.assertTrue(modern["excluded_from_voc_perfection_translation_collection_reception"])
 
     def test_real_soft_applying_perfection_reaches_positive_A_grade(self):
-        # 2026-09-04 15:00 KST: Capricorn ASC -> Saturn/Moon 1H-7H pair.
-        # Moon is inside the Saturn-Moon moiety orb and applies to sextile,
-        # perfecting before the Moon leaves Gemini. This is a real ephemeris
-        # positive sentinel so the engine cannot silently become "always NO".
         data = compute(
-            "2026-09-04T15:00:00+09:00",
-            topic="general",
+            "2026-09-04T15:00:00+09:00", topic="general",
             question="이 일은 실제로 성사될까요?",
         )
         j = data["judgment_support"]
@@ -167,12 +141,8 @@ class HoraryEngineV6Tests(unittest.TestCase):
         self.assertEqual(j["traditional_core_v6"]["evidence_grade"], "A")
 
     def test_real_hard_applying_perfection_is_not_automatic_no(self):
-        # 2026-09-06 15:00 KST: the same Saturn/Moon relationship is an
-        # applying square inside moiety orb. A hard aspect may indicate
-        # friction, but an exact perfection must remain a direct A-grade fact.
         data = compute(
-            "2026-09-06T15:00:00+09:00",
-            topic="general",
+            "2026-09-06T15:00:00+09:00", topic="general",
             question="어려움이 있어도 이 일은 성사될까요?",
         )
         j = data["judgment_support"]
@@ -183,12 +153,8 @@ class HoraryEngineV6Tests(unittest.TestCase):
         self.assertEqual(j["traditional_core_v6"]["evidence_grade"], "A")
 
     def test_real_within_orb_separating_aspect_does_not_become_perfection(self):
-        # 2026-09-05 01:00 KST: Moon/Saturn sextile is still within moiety
-        # but already separating. This catches the opposite failure mode:
-        # within-orb geometry alone must not create active perfection.
         data = compute(
-            "2026-09-05T01:00:00+09:00",
-            topic="general",
+            "2026-09-05T01:00:00+09:00", topic="general",
             question="이미 지나간 흐름이 다시 성사각으로 잡히나요?",
         )
         j = data["judgment_support"]
