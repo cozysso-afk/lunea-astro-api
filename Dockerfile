@@ -12,7 +12,8 @@ RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install -r requirements.txt
 
 COPY astro_core.py astro_api.py transit_extended.py \
-     horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py horary_topic_routes_v3.py ./
+     horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
+     horary_topic_routes_v3.py horary_engine_v5.py ./
 
 RUN python -c "from astro_core import load_ephemeris; x=load_ephemeris(); print('Ephemeris:', x[5])"
 RUN python -c "import astro_api; print('Astro API import OK, version =', astro_api.app.version, 'transit max days =', astro_api.MAX_TRANSIT_DAYS)"
