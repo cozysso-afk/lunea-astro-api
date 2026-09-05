@@ -114,9 +114,6 @@ class HoraryEngineV7Tests(unittest.TestCase):
         self.assertTrue(beyond["traditional_state"].startswith("out_of_orb_"))
 
     def test_real_exact_boundary_flips_applying_to_separating(self):
-        # Saturn/Moon sextile perfects around the evening of 2026-09-04 KST.
-        # Pin two points safely on opposite sides of exactness so a future
-        # regression cannot label both sides applying (or both separating).
         before = compute("2026-09-04T19:20:00+09:00")
         after = compute("2026-09-04T20:00:00+09:00")
         self.assertEqual(before["judgment_support"]["primary_connection"]["traditional_state"], "valid_applying")
@@ -173,6 +170,42 @@ class HoraryEngineV7Tests(unittest.TestCase):
         self.assertTrue(str(hard_grade).startswith("A"))
         self.assertEqual(hard["judgment_support"]["traditional_core_v7"]["direct_aspect_tone_v7"], "frictional")
         self.assertNotEqual(negative["judgment_support"]["traditional_core_v7"]["qualified_evidence_grade_v7"], "A_CLEAR")
+
+    def test_fixed_multi_topic_bias_matrix_is_not_one_sided(self):
+        # This is deliberately NOT a 50/50 calibration test. It only proves
+        # that with fixed real ephemerides and several house routes the engine
+        # can reach both direct-perfection and non-perfection states. If a
+        # future change makes every cell negative (or every cell positive), CI
+        # fails instead of silently shipping a structurally biased engine.
+        epochs = [
+            "2026-09-04T15:00:00+09:00",
+            "2026-09-05T01:00:00+09:00",
+            "2026-09-05T18:11:00+09:00",
+            "2026-09-06T15:00:00+09:00",
+        ]
+        topics = ("general", "contact", "reconciliation")
+        cells = []
+        for topic in topics:
+            for epoch in epochs:
+                data = compute(epoch, topic=topic, question=f"{topic} 편향 매트릭스 검산")
+                j = data["judgment_support"]
+                cells.append({
+                    "topic": topic,
+                    "epoch": epoch,
+                    "perfects": bool(j["perfection"]["perfects"]),
+                    "state": (j.get("primary_connection") or {}).get("traditional_state"),
+                    "grade": (j.get("traditional_core_v7") or {}).get("qualified_evidence_grade_v7"),
+                    "route_ok": bool((j.get("route_contract_v7") or {}).get("matches_spec")),
+                })
+
+        positives = [x for x in cells if x["perfects"]]
+        negatives = [x for x in cells if not x["perfects"]]
+        self.assertTrue(positives, "fixed real-ephemeris matrix became all-negative")
+        self.assertTrue(negatives, "fixed real-ephemeris matrix became all-positive")
+        self.assertTrue(any(str(x["grade"] or "").startswith("A") for x in cells))
+        self.assertTrue(any(not str(x["grade"] or "").startswith("A") for x in cells))
+        self.assertTrue(all(x["route_ok"] for x in cells))
+        self.assertGreaterEqual(len({x["state"] for x in cells if x["state"]}), 2)
 
     def test_real_payload_exposes_v7_dignity_moon_route_and_bias_contracts(self):
         data = compute("2026-09-04T15:00:00+09:00")
