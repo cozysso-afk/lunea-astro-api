@@ -37,6 +37,16 @@ EXTRA_HORARY_TOPIC_SPECS = {
         "event_house": None,
         "note": "특정 상대 관계축보다 문서·소식 자체가 핵심인 질문은 3하우스를 사용합니다.",
     },
+    "lost_object": {
+        "label_ko": "분실물·소유물 위치",
+        "quesited_house": 2,
+        "event_house": None,
+        "note": (
+            "질문자가 소유한 이동 가능한 분실물·소지품은 2하우스와 그 주인행성을 "
+            "핵심 위치 시그니피케이터로 사용합니다. 위치 질문에서는 직접 성사각 부재를 "
+            "물건 부재나 위치 부정으로 해석하지 않습니다."
+        ),
+    },
 }
 
 core.HORARY_TOPIC_SPECS.update(EXTRA_HORARY_TOPIC_SPECS)
