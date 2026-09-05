@@ -14,6 +14,7 @@ RUN python -m pip install --upgrade pip setuptools wheel \
 COPY astro_core.py astro_api.py transit_extended.py \
      horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
      horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py ./
+COPY tests/test_horary_engine_v7.py tests/test_horary_patterns_real_v7.py ./tests/
 
 RUN python -c "from astro_core import load_ephemeris; x=load_ephemeris(); print('Ephemeris:', x[5])"
 RUN python -c "import astro_api; print('Astro API import OK, version =', astro_api.app.version, 'transit max days =', astro_api.MAX_TRANSIT_DAYS)"
@@ -52,6 +53,7 @@ assert j['traditional_core_v6']['chart_invalid'] is False
 assert j['route_contract_v7']['matches_spec'] is True
 assert len(j['essential_dignities_v7']) == 7
 assert j['bias_guard_v7']['direct_perfection_can_be_positive'] is True
+assert j['bias_guard_v7']['mixed_dignity_debility_preserved'] is True
 
 # Positive soft-aspect sentinel: prevents an always-negative engine.
 soft = calc('2026-09-04T15:00:00+09:00')
@@ -89,6 +91,11 @@ assert 'question_relevant' in soft['judgment_support']['moon_relevance_v7']
 
 print('Horary V7 deployment sentinels OK: negative / soft-positive / hard-positive / separating / Moon relevance / dignity')
 PY
+
+# Production builds also execute the real-ephemeris Translation / Collection /
+# Prohibition / Frustration / station-Refranation goldens. A regression here
+# blocks the Render image instead of silently shipping a biased Horary engine.
+RUN python -m unittest -v tests.test_horary_patterns_real_v7
 
 ENV PORT=10000
 EXPOSE 10000
