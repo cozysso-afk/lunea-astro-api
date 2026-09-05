@@ -27,7 +27,6 @@ def compute(question_iso: str, *, topic: str = "general", question: str = "이 �
 
 class HoraryEngineV7Tests(unittest.TestCase):
     def test_minor_dignity_prevents_false_peregrine_display(self):
-        # Sagittarius is Fire; in a day chart Sun is the active triplicity ruler.
         row = {
             "longitude": 250.0,
             "sign_index": 8,
@@ -39,6 +38,23 @@ class HoraryEngineV7Tests(unittest.TestCase):
         self.assertEqual(profile["classification"], "minor_dignity")
         self.assertIn("트리플리시티", profile["label_ko"])
         self.assertGreater(profile["score"], 0)
+
+    def test_dignity_and_debility_can_coexist_without_bias(self):
+        # Saturn in late Aries is in fall, while Egyptian terms can still give
+        # Saturn a minor dignity. V7 must preserve both facts, not choose one.
+        row = {
+            "longitude": 27.0,
+            "sign_index": 0,
+            "dignity": "fall",
+            "dignity_ko": "추락",
+        }
+        profile = v7._essential_profile("Saturn", row, True)
+        self.assertIn("term", profile["held_dignities"])
+        self.assertIn("fall", profile["debilities"])
+        self.assertEqual(profile["classification"], "mixed_dignity_debility")
+        self.assertIn("텀", profile["label_ko"])
+        self.assertIn("추락", profile["label_ko"])
+        self.assertEqual(profile["score"], -2)
 
     def test_moon_movement_is_not_automatically_question_support(self):
         base = {
@@ -98,7 +114,6 @@ class HoraryEngineV7Tests(unittest.TestCase):
         self.assertIn("확인된 선행 방해", core_v6["staged_judgment"]["direct_perfection"])
 
     def test_moiety_boundary_is_inclusive_then_outside(self):
-        # Saturn moiety 4.5 + Sun moiety 7.5 = 12.0 degrees.
         saturn = {"longitude": 0.0, "speed_deg_per_day": 0.0, "sign_index": 0}
         exact_limit = {"longitude": 132.0, "speed_deg_per_day": -1.0, "sign_index": 4}
         outside = {"longitude": 132.001, "speed_deg_per_day": -1.0, "sign_index": 4}
@@ -115,7 +130,6 @@ class HoraryEngineV7Tests(unittest.TestCase):
         self.assertTrue(beyond["traditional_state"].startswith("out_of_orb_"))
 
     def test_topic_route_contracts_are_valid_and_match_real_payloads(self):
-        # Static contract: every configured route must resolve to legal houses.
         for topic, spec in core.HORARY_TOPIC_SPECS.items():
             with self.subTest(topic=topic):
                 self.assertIn(int(spec["quesited_house"]), range(1, 13))
@@ -175,6 +189,7 @@ class HoraryEngineV7Tests(unittest.TestCase):
         self.assertTrue(j["route_contract_v7"]["matches_spec"])
         self.assertTrue(j["bias_guard_v7"]["hard_aspect_is_not_automatic_no"])
         self.assertTrue(j["bias_guard_v7"]["moon_movement_is_not_automatically_question_support"])
+        self.assertTrue(j["bias_guard_v7"]["mixed_dignity_debility_preserved"])
 
 
 if __name__ == "__main__":
