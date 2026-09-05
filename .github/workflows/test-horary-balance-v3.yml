@@ -23,6 +23,8 @@ jobs:
         run: python -m unittest -v tests.test_horary_balance_v3
       - name: Horary V3.1 traditional-pattern tests
         run: python -m unittest -v tests.test_horary_balance_v31
+      - name: Horary V4 condition/location enrichment tests
+        run: python -m unittest -v tests.test_horary_enrichment_v4
       - name: Thai Taksa range calendar tests
         run: python -m unittest -v tests.test_thai_taksa_range
       - name: Render Docker image smoke build
