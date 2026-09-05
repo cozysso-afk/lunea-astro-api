@@ -139,3 +139,6 @@ v31._is_day_chart = _is_day_chart_altitude
 if not getattr(v31.compute_horary, "_lunea_engine_v5", False):
     _compute_horary_v5._lunea_engine_v5 = True
     v31.compute_horary = _compute_horary_v5
+
+# V6 must load after V5 has installed moiety-orb and sect policies.
+import horary_engine_v6  # noqa: F401,E402
