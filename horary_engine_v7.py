@@ -12,6 +12,8 @@ import horary_engine_v6 as v6
 # Bias/interpretation hardening over Strict V6:
 # - minor essential dignities are surfaced so a planet is not called peregrine
 #   when it actually holds triplicity / term / face dignity
+# - dignity and debility may coexist; mixed testimony is preserved rather than
+#   forcing an optimistic or pessimistic single label
 # - Moon motion is separated from question-relevant Moon testimony
 # - direct perfection with a confirmed obstruction is qualified, never silently
 #   flattened into either automatic YES or automatic NO
@@ -28,6 +30,7 @@ DIGNITY_LABEL_KO = {
     "term": "텀·바운드",
     "face": "페이스·데칸",
 }
+DEBILITY_LABEL_KO = {"detriment": "디트리먼트", "fall": "추락"}
 DIGNITY_POINTS = {
     "domicile": 5,
     "exaltation": 4,
@@ -44,16 +47,19 @@ def _essential_profile(body: str, row: dict, day_chart: bool) -> dict:
     original = str(row.get("dignity") or "peregrine")
     debilities = [original] if original in DEBILITY_POINTS else []
     score = sum(DIGNITY_POINTS[x] for x in held) + sum(DEBILITY_POINTS[x] for x in debilities)
+    held_ko = [DIGNITY_LABEL_KO[x] for x in held]
+    debility_ko = [DEBILITY_LABEL_KO[x] for x in debilities]
 
-    if held:
-        held_ko = [DIGNITY_LABEL_KO[x] for x in held]
+    if held and debilities:
+        label_ko = "혼합 상태 · " + " + ".join(held_ko + debility_ko)
+        classification = "mixed_dignity_debility"
+    elif held:
         label_ko = "본질적 존귀 · " + " + ".join(held_ko)
         classification = "major_dignity" if held[0] in {"domicile", "exaltation"} else "minor_dignity"
     elif debilities:
-        label_ko = row.get("dignity_ko") or ("손상 · 디트리먼트" if original == "detriment" else "손상 · 추락")
+        label_ko = row.get("dignity_ko") or ("손상 · " + " + ".join(debility_ko))
         classification = "debility"
     else:
-        held_ko = []
         label_ko = "무권위·페레그린"
         classification = "peregrine"
 
@@ -62,8 +68,9 @@ def _essential_profile(body: str, row: dict, day_chart: bool) -> dict:
         "body_ko": core.PLANET_KO.get(body, body),
         "classification": classification,
         "held_dignities": held,
-        "held_dignities_ko": [DIGNITY_LABEL_KO[x] for x in held],
+        "held_dignities_ko": held_ko,
         "debilities": debilities,
+        "debilities_ko": debility_ko,
         "score": score,
         "label_ko": label_ko,
         "owners": owners,
@@ -73,6 +80,8 @@ def _essential_profile(body: str, row: dict, day_chart: bool) -> dict:
 
 def _enrich_dignities(data: dict) -> dict:
     planets = data.get("planets") or {}
+    judgment = data.setdefault("judgment_support", {})
+    condition_rows = judgment.get("planet_conditions_v4") or {}
     day_chart = bool(v31._is_day_chart(data))
     profiles = {}
     for body in core.HORARY_PLANETS:
@@ -84,12 +93,20 @@ def _enrich_dignities(data: dict) -> dict:
         row["essential_dignity_v7"] = profile
         row["dignity_effective"] = profile["classification"]
         row["dignity_ko_original"] = row.get("dignity_ko")
-        # Prevent the UI/AI raw chart from calling a planet peregrine when it
-        # actually has triplicity/term/face dignity. Machine-level legacy
-        # `dignity` is preserved for compatibility.
-        if profile["held_dignities"] and str(row.get("dignity")) == "peregrine":
+
+        # Replace only the human-facing label. The machine-level legacy dignity
+        # key remains untouched for compatibility with older calculations.
+        if profile["classification"] in {"minor_dignity", "mixed_dignity_debility"}:
             row["dignity_ko"] = profile["label_ko"]
-    data.setdefault("judgment_support", {})["essential_dignities_v7"] = profiles
+        elif profile["held_dignities"] and str(row.get("dignity")) == "peregrine":
+            row["dignity_ko"] = profile["label_ko"]
+
+        if isinstance(condition_rows.get(body), dict):
+            condition_rows[body]["dignity_ko_original"] = condition_rows[body].get("dignity_ko")
+            condition_rows[body]["dignity_ko"] = row.get("dignity_ko")
+            condition_rows[body]["essential_dignity_v7"] = profile
+
+    judgment["essential_dignities_v7"] = profiles
     return profiles
 
 
@@ -265,6 +282,7 @@ def _postprocess(data: dict) -> dict:
         "dignity_is_not_event_yes_no": True,
         "reception_is_not_perfection": True,
         "moon_movement_is_not_automatically_question_support": True,
+        "mixed_dignity_debility_preserved": True,
     }
     if core_v6:
         j["traditional_core_v7"] = deepcopy(core_v6)
