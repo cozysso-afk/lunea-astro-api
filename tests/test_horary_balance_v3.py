@@ -46,38 +46,38 @@ def base_data(primary, reception=None, *, primary_connection=None, moon=None, ev
 
 
 class HoraryBalanceV3Tests(unittest.TestCase):
-    def test_out_of_orb_future_perfection_is_detected(self):
+    def test_production_patch_rejects_out_of_orb_future_perfection(self):
+        # Legacy V3 used to search forward from an out-of-orb geometric aspect
+        # and could promote it to direct perfection. The production import chain
+        # now patches this entry point with Strict V6, so this regression test
+        # intentionally proves that the old behavior can no longer return.
         dt = datetime(2026, 9, 2, tzinfo=UTC)
         row_a = planet(0.0, 1.0)
         row_b = planet(80.0, 0.2)
-        times = [dt, dt + timedelta(days=1), dt + timedelta(days=2)]
-        a_lons = np.asarray([0.0, 1.0, 2.0])
-        b_lons = np.asarray([80.0, 70.0, 62.0])
-
         initial = {
+            "a": "Venus",
+            "b": "Mars",
             "phase": "out_of_orb",
             "aspect": "sextile",
             "aspect_ko": "육십분위",
             "angle": 60.0,
             "orb": 20.0,
+            "max_orb": 7.25,
             "within_orb": False,
+            "traditional_valid_aspect": None,
+            "traditional_state": "out_of_orb_applying",
+            "traditional_state_ko": "유효 오브 밖 · 기하학적으로 접근 중",
         }
 
-        def exact_lon(body, _):
-            return 2.0 if body == "Venus" else 62.0
-
-        with patch.object(core, "_horary_aspect_state", return_value=initial), \
-             patch.object(v3, "_sample_until_first_sign_change", return_value=(times, a_lons, b_lons, None)), \
-             patch.object(core, "_horary_refine_pair", return_value=(times[-1], 0.0)), \
-             patch.object(core, "get_tropical_ecliptic_lon", side_effect=exact_lon):
+        with patch.object(core, "_horary_aspect_state", return_value=initial):
             result = v3._balanced_perfection_candidate(
                 "Venus", row_a, "Mars", row_b, dt, "Asia/Seoul"
             )
 
-        self.assertTrue(result["perfects"])
-        self.assertEqual(result["reason"], "future_perfection_from_out_of_orb")
-        self.assertTrue(result["before_sign_change"])
-        self.assertEqual(result["aspect"]["aspect"], "sextile")
+        self.assertFalse(result["perfects"])
+        self.assertEqual(result["reason"], "out_of_orb_no_active_perfection")
+        self.assertFalse(result["perfection_check_started"])
+        self.assertFalse(result["refranation_applicable"])
 
     def test_hard_perfection_with_mutual_reception_is_not_negative(self):
         primary = {
