@@ -34,6 +34,7 @@ app.add_middleware(
         "http://localhost:8000",
         "http://127.0.0.1:5500",
     ],
+    allow_origin_regex=r"^https://(?:lunea-v57-clean-[a-z0-9]{9}-[a-z0-9-]+|lunea-v57-clean-git-verify-662f40e-iphone-[a-z0-9-]+)\.vercel\.app$",
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
