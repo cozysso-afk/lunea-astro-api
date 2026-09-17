@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -31,21 +31,18 @@ def test_transit_motion_uses_one_vector_batch(monkeypatch):
     assert np.allclose(speed, np.array([1.0, 1.0]))
 
 
-def test_return_grid_is_coarser_but_exact_refiner_is_unchanged():
+def test_return_grid_keeps_original_full_density():
     expected = {
-        "Moon": 4.0,
-        "Sun": 24.0,
-        "Mercury": 12.0,
-        "Venus": 24.0,
-        "Mars": 24.0,
-        "Jupiter": 96.0,
-        "Saturn": 192.0,
+        "Moon": 1.0,
+        "Sun": 12.0,
+        "Mercury": 6.0,
+        "Venus": 12.0,
+        "Mars": 12.0,
+        "Jupiter": 48.0,
+        "Saturn": 96.0,
     }
-    assert perf.RETURN_STEP_HOURS == expected
     for body, step in expected.items():
         assert core.RETURN_CONFIG_V1[body]["step_hours"] == step
 
-    # The precision owner remains the existing refinement code. The hotfix only
-    # changes the coarse bracketing grid and never replaces these functions.
     assert callable(core._bisect_return_crossing)
     assert callable(core._refine_minimum_orb)
