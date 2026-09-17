@@ -5,6 +5,7 @@ from datetime import timedelta
 import numpy as np
 
 import astro_core as core
+import astro_performance_v2  # noqa: F401  # installs shared transit/return performance fixes
 
 
 MAX_TRANSIT_DAYS = 365
