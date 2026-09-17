@@ -12,12 +12,13 @@ RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install -r requirements.txt
 
 COPY astro_core.py astro_api.py transit_extended.py astro_performance_v2.py \
+     astro_jobs_v1.py astro_job_api.py \
      horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
      horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py ./
 COPY tests/test_horary_engine_v7.py tests/test_horary_patterns_real_v7.py ./tests/
 
 RUN python -c "from astro_core import load_ephemeris; x=load_ephemeris(); print('Ephemeris:', x[5])"
-RUN python -c "import astro_api; print('Astro API import OK, version =', astro_api.app.version, 'transit max days =', astro_api.MAX_TRANSIT_DAYS)"
+RUN python -c "import astro_job_api; print('Astro API+jobs import OK, version =', astro_job_api.app.version)"
 RUN python - <<'PY'
 import horary_topic_routes_v3  # noqa: F401
 import horary_balance_v31 as v31
@@ -100,4 +101,4 @@ RUN python -m unittest -v tests.test_horary_engine_v7 tests.test_horary_patterns
 ENV PORT=10000
 EXPOSE 10000
 
-CMD ["sh", "-c", "uvicorn astro_api:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh", "-c", "uvicorn astro_job_api:app --host 0.0.0.0 --port ${PORT:-10000}"]
