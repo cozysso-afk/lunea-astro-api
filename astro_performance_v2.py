@@ -2,12 +2,11 @@ from __future__ import annotations
 
 """LUNEA Astro Core performance hotfix V2.
 
-Keeps calculation semantics intact while reducing repeated ephemeris work:
+Reduces repeated ephemeris work without reducing the calculation search space:
 - Transit motion vectors are evaluated in one Skyfield vector batch per body
   instead of three separate batches (past / now / future).
-- Return searches use wider *bracketing* grids. Exact crossing times are still
-  refined by the existing bisection/minimum-orb routines after a bracket is
-  found, so the final return timestamp precision is unchanged.
+- Return search density is deliberately left untouched so retrograde/stationary
+  edge cases retain the original detection coverage.
 """
 
 from datetime import timedelta
@@ -15,17 +14,6 @@ from datetime import timedelta
 import numpy as np
 
 import astro_core as core
-
-
-RETURN_STEP_HOURS = {
-    "Moon": 4.0,
-    "Sun": 24.0,
-    "Mercury": 12.0,
-    "Venus": 24.0,
-    "Mars": 24.0,
-    "Jupiter": 96.0,
-    "Saturn": 192.0,
-}
 
 
 def _motion_arrays_batched(body, sample_times):
@@ -38,8 +26,9 @@ def _motion_arrays_batched(body, sample_times):
     past_times = [d - timedelta(hours=h) for d in sample_times]
     future_times = [d + timedelta(hours=h) for d in sample_times]
 
-    # One vectorized Skyfield observation is materially cheaper on Render's
-    # small CPU instances than three separate observations of the same body.
+    # One vectorized Skyfield observation is materially cheaper on small CPU
+    # instances than three separate observations of the same body. The exact
+    # same timestamps are evaluated; only the call batching changes.
     combined = past_times + list(sample_times) + future_times
     values = np.ravel(core.get_tropical_ecliptic_lons(body, combined))
     if values.size != n * 3:
@@ -57,10 +46,8 @@ def _motion_arrays_batched(body, sample_times):
 
 
 def install():
+    # Performance-only patch: do not alter RETURN_CONFIG_V1 or any search grid.
     core._motion_arrays = _motion_arrays_batched
-    for body, step_hours in RETURN_STEP_HOURS.items():
-        if body in core.RETURN_CONFIG_V1:
-            core.RETURN_CONFIG_V1[body]["step_hours"] = float(step_hours)
 
 
 install()
