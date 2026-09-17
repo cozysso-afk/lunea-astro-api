@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install -r requirements.txt
 
-COPY astro_core.py astro_api.py transit_extended.py \
+COPY astro_core.py astro_api.py transit_extended.py astro_performance_v2.py \
      horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
      horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py ./
 COPY tests/test_horary_engine_v7.py tests/test_horary_patterns_real_v7.py ./tests/
