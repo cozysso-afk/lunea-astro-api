@@ -12,6 +12,7 @@ A small shared pool lets Horary / Return stay responsive while Transit is busy.
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import re
 import secrets
 import threading
 import time
@@ -47,6 +48,24 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _coordinates_from_place(place: Any) -> tuple[float | None, float | None]:
+    """Recover coordinates from labels such as '현재 위치 (34.7594, 127.6530)'."""
+    raw = str(place or "").strip()
+    if not raw:
+        return None, None
+    match = re.search(
+        r"\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)",
+        raw,
+    )
+    if not match:
+        return None, None
+    lat = float(match.group(1))
+    lon = float(match.group(2))
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None, None
+    return lat, lon
+
+
 def _cleanup_locked() -> None:
     now = time.time()
     expired = [
@@ -76,14 +95,24 @@ def _compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("질문 원문이 비어 있습니다.")
         if not question_iso:
             raise ValueError("질문 시각이 비어 있습니다.")
+
+        lat = payload.get("lat")
+        lon = payload.get("lon")
+        if lat is None or lon is None:
+            parsed_lat, parsed_lon = _coordinates_from_place(payload.get("place"))
+            if lat is None:
+                lat = parsed_lat
+            if lon is None:
+                lon = parsed_lon
+
         return compute_horary(
             question_text=question_text,
             question_iso=question_iso,
             topic=str(payload.get("topic") or "general"),
             timezone_name=str(payload.get("timezone") or "Asia/Seoul"),
             place=payload.get("place"),
-            lat=payload.get("lat"),
-            lon=payload.get("lon"),
+            lat=lat,
+            lon=lon,
         )
 
     if kind == "transit":
