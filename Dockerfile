@@ -12,11 +12,11 @@ RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install -r requirements.txt
 
 COPY astro_core.py astro_api.py transit_extended.py astro_performance_v2.py \
-     astro_jobs_v1.py astro_job_api.py saju_core.py profile_auto_api.py \
+     astro_jobs_v1.py astro_job_api.py saju_core.py profile_auto_api.py vedic_core.py vedic_api.py \
      horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
      horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py ./
 COPY tests/test_horary_engine_v7.py tests/test_horary_patterns_real_v7.py \
-     tests/test_saju_core_v1.py ./tests/
+     tests/test_saju_core_v1.py tests/test_vedic_core_v1.py ./tests/
 
 RUN python -c "from astro_core import load_ephemeris; x=load_ephemeris(); print('Ephemeris:', x[5])"
 RUN python -c "import astro_job_api; print('Astro API+jobs import OK, version =', astro_job_api.app.version)"
@@ -97,7 +97,7 @@ PY
 # Production builds execute the V7 bias/route/boundary suite and real-ephemeris
 # Translation / Collection / Prohibition / Frustration / station-Refranation
 # goldens. Any regression blocks the Render image.
-RUN python -m unittest -v tests.test_horary_engine_v7 tests.test_horary_patterns_real_v7 tests.test_saju_core_v1
+RUN python -m unittest -v tests.test_horary_engine_v7 tests.test_horary_patterns_real_v7 tests.test_saju_core_v1 tests.test_vedic_core_v1
 
 ENV PORT=10000
 EXPOSE 10000
