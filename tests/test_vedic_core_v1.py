@@ -46,6 +46,8 @@ class VedicCoreV1Tests(unittest.TestCase):
         self.assertTrue(provenance["sidereal"])
         self.assertEqual(provenance["ayanamsha"], "Lahiri")
         self.assertEqual(provenance["node_policy"], "true_node")
+        self.assertEqual(provenance["panchanga_vara_boundary"], "civil_midnight_v1")
+        self.assertFalse(provenance["panchanga_vara_sunrise_boundary"])
         self.assertFalse(provenance["d9_navamsa"])
         self.assertFalse(provenance["vimshottari_dasha"])
         self.assertFalse(provenance["interpretation_generated"])
