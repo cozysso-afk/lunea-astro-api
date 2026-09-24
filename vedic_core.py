@@ -208,6 +208,8 @@ def compute_vedic_profile(
             "ayanamsha": "Lahiri",
             "node_policy": "true_node",
             "house_policy": "whole_sign_from_sidereal_lagna",
+            "panchanga_vara_boundary": "civil_midnight_v1",
+            "panchanga_vara_sunrise_boundary": False,
             "d9_navamsa": False,
             "vimshottari_dasha": False,
             "interpretation_generated": False,
