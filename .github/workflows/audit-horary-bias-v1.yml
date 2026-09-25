@@ -6,6 +6,7 @@ on:
     paths:
       - 'scripts/horary_bias_audit_v1.py'
       - 'scripts/horary_bias_audit_v1_ci.py'
+      - 'scripts/horary_bias_audit_v1_axis.py'
       - 'horary_balance_v3.py'
       - 'horary_balance_v31.py'
       - 'horary_engine_v6.py'
@@ -31,20 +32,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Syntax check
-        run: PYTHONPATH=. python -m py_compile scripts/horary_bias_audit_v1.py scripts/horary_bias_audit_v1_ci.py
+        run: PYTHONPATH=. python -m py_compile scripts/horary_bias_audit_v1.py scripts/horary_bias_audit_v1_ci.py scripts/horary_bias_audit_v1_axis.py
       - name: Run deterministic bias audit
         run: |
           mkdir -p audit-output
-          PYTHONPATH=. python scripts/horary_bias_audit_v1_ci.py \
+          PYTHONPATH=. python scripts/horary_bias_audit_v1_axis.py \
             --start 2026-01-01 \
             --end 2026-09-24 \
-            --direct-date-count 4 \
-            --direct-hours 3,9,15,21 \
+            --date-count 8 \
+            --hours 3,9,15,21 \
             --topics general,contact,reconciliation,career,contract \
             --locations seoul,london \
+            --full-date 2026-09-05 \
+            --full-hour 15 \
             --full-topics general,contact,reconciliation \
-            --full-dates 2026-03-15,2026-09-05 \
-            --full-hours 15 \
             --output-dir audit-output | tee audit-output/console.txt
       - name: Upload audit report
         uses: actions/upload-artifact@v4
