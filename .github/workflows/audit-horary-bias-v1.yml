@@ -1,4 +1,4 @@
-name: Audit Horary Bias V1
+name: Audit Horary Bias V1-V2
 
 on:
   pull_request:
@@ -7,6 +7,7 @@ on:
       - 'scripts/horary_bias_audit_v1.py'
       - 'scripts/horary_bias_audit_v1_ci.py'
       - 'scripts/horary_bias_audit_v1_axis.py'
+      - 'scripts/horary_bias_audit_v2.py'
       - 'horary_balance_v3.py'
       - 'horary_balance_v31.py'
       - 'horary_engine_v6.py'
@@ -20,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  audit:
+  audit-v1:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -31,11 +32,11 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Syntax check
+      - name: Syntax check V1
         run: PYTHONPATH=. python -m py_compile scripts/horary_bias_audit_v1.py scripts/horary_bias_audit_v1_ci.py scripts/horary_bias_audit_v1_axis.py
-      - name: Run deterministic bias audit
+      - name: Run direct-gate bias audit V1
         run: |
-          mkdir -p audit-output
+          mkdir -p audit-output-v1
           PYTHONPATH=. python scripts/horary_bias_audit_v1_axis.py \
             --start 2026-01-01 \
             --end 2026-09-24 \
@@ -46,10 +47,41 @@ jobs:
             --full-date 2026-09-05 \
             --full-hour 15 \
             --full-topics general,contact,reconciliation \
-            --output-dir audit-output | tee audit-output/console.txt
-      - name: Upload audit report
+            --output-dir audit-output-v1 | tee audit-output-v1/console.txt
+      - name: Upload V1 report
         uses: actions/upload-artifact@v4
         with:
           name: horary-bias-audit-v1
-          path: audit-output/
+          path: audit-output-v1/
+          if-no-files-found: error
+
+  audit-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check V2
+        run: PYTHONPATH=. python -m py_compile scripts/horary_bias_audit_v2.py
+      - name: Run full-evidence bias audit V2
+        run: |
+          mkdir -p audit-output-v2
+          PYTHONPATH=. python scripts/horary_bias_audit_v2.py \
+            --start 2026-01-01 \
+            --end 2026-09-24 \
+            --date-count 4 \
+            --hours 9,21 \
+            --topics general,contact,reconciliation \
+            --locations seoul,london \
+            --output-dir audit-output-v2 | tee audit-output-v2/console.txt
+      - name: Upload V2 report
+        uses: actions/upload-artifact@v4
+        with:
+          name: horary-bias-audit-v2
+          path: audit-output-v2/
           if-no-files-found: error
