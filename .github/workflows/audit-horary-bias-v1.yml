@@ -1,0 +1,46 @@
+name: Audit Horary Bias V1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/horary_bias_audit_v1.py'
+      - 'horary_balance_v3.py'
+      - 'horary_balance_v31.py'
+      - 'horary_engine_v6.py'
+      - 'horary_engine_v7.py'
+      - 'astro_core.py'
+      - '.github/workflows/audit-horary-bias-v1.yml'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check
+        run: PYTHONPATH=. python -m py_compile scripts/horary_bias_audit_v1.py
+      - name: Run deterministic bias audit
+        run: |
+          mkdir -p audit-output
+          PYTHONPATH=. python scripts/horary_bias_audit_v1.py \
+            --start 2026-01-01 \
+            --end 2026-09-24 \
+            --date-count 12 \
+            --hours 3,9,15,21 \
+            --topics general,contact,reconciliation,career,contract \
+            --locations seoul,london \
+            --output-dir audit-output | tee audit-output/console.txt
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: horary-bias-audit-v1
+          path: audit-output/
+          if-no-files-found: error
