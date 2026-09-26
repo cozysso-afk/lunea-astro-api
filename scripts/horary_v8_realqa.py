@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from collections import Counter
@@ -21,7 +22,6 @@ LOCATIONS = {
     "london": {"place": "London", "timezone": "Europe/London", "lat": 51.5074, "lon": -0.1278},
 }
 
-# Natural-language questions representative of the product's high-use judgment families.
 QUESTIONS = {
     "contact": "그 사람이 이번 주 안에 나에게 먼저 연락할까요?",
     "reconciliation": "우리가 다시 연인으로 만날 수 있을까요?",
@@ -30,8 +30,6 @@ QUESTIONS = {
     "contract": "이 계약이 실제로 체결될까요?",
 }
 
-# Four calendar anchors x two locations = eight real ephemeris moments per topic.
-# Hours are deliberately mixed rather than sampling only one local daypart.
 MOMENTS = [
     ("2026-01-15", "09:00"),
     ("2026-03-20", "21:00"),
@@ -79,7 +77,6 @@ def compute_cell(topic: str, location_key: str, date_s: str, time_s: str) -> dic
     action = v8.get("action_state_v8") or {}
     source = str(v8.get("grade_source_v8") or "")
 
-    # Regression invariants: V8 may add only the narrow Moon co-significator C channel.
     if b7 in {"A", "B", "C"} and b8 != b7:
         raise AssertionError(f"V8 changed established {b7} evidence: {topic} {g7} -> {g8}")
     if b7 in {"D", "NONE"} and b8 == "C":
@@ -123,9 +120,9 @@ def compute_cell(topic: str, location_key: str, date_s: str, time_s: str) -> dic
     }
 
 
-def summarize(rows: list[dict]) -> dict:
+def summarize(rows: list[dict], topics: list[str]) -> dict:
     out = {}
-    for topic in QUESTIONS:
+    for topic in topics:
         xs = [r for r in rows if r["topic"] == topic]
         out[topic] = {
             "n": len(xs),
@@ -197,11 +194,19 @@ def render(payload: dict) -> str:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--topics", default=",".join(QUESTIONS))
+    parser.add_argument("--output-suffix", default="all")
+    args = parser.parse_args()
+    topics = [x.strip() for x in args.topics.split(",") if x.strip() in QUESTIONS]
+    if not topics:
+        raise SystemExit("no valid topics selected")
+
     rows: list[dict] = []
     failures: list[str] = []
-    total = len(QUESTIONS) * len(LOCATIONS) * len(MOMENTS)
+    total = len(topics) * len(LOCATIONS) * len(MOMENTS)
     done = 0
-    for topic in QUESTIONS:
+    for topic in topics:
         for location in LOCATIONS:
             for date_s, time_s in MOMENTS:
                 done += 1
@@ -218,18 +223,21 @@ def main() -> int:
         "version": VERSION,
         "meta": {
             "cells": len(rows),
-            "topics": list(QUESTIONS),
+            "topics": topics,
             "locations": list(LOCATIONS),
             "moments": [f"{d}T{t}" for d, t in MOMENTS],
         },
-        "summary": summarize(rows),
+        "summary": summarize(rows, topics),
         "cells": rows,
     }
     out = Path("audit-output")
     out.mkdir(exist_ok=True)
-    (out / "horary-v8-realqa.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    suffix = args.output_suffix.replace("/", "-")
+    json_path = out / f"horary-v8-realqa-{suffix}.json"
+    md_path = out / f"horary-v8-realqa-{suffix}.md"
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     report = render(payload)
-    (out / "horary-v8-realqa.md").write_text(report, encoding="utf-8")
+    md_path.write_text(report, encoding="utf-8")
     print(report)
     return 0
 
