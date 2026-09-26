@@ -7,6 +7,10 @@ on:
 
 jobs:
   audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        topic: [contact, reconciliation, relationship, career, contract]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,11 +23,11 @@ jobs:
       - name: Syntax check
         run: python -m py_compile scripts/horary_v8_realqa.py
       - name: Run V8 real-chart QA matrix
-        run: python scripts/horary_v8_realqa.py
+        run: python scripts/horary_v8_realqa.py --topics "${{ matrix.topic }}" --output-suffix "${{ matrix.topic }}"
       - name: Upload QA report
         uses: actions/upload-artifact@v4
         with:
-          name: horary-v8-realqa
+          name: horary-v8-realqa-${{ matrix.topic }}
           path: |
-            audit-output/horary-v8-realqa.json
-            audit-output/horary-v8-realqa.md
+            audit-output/horary-v8-realqa-${{ matrix.topic }}.json
+            audit-output/horary-v8-realqa-${{ matrix.topic }}.md
