@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
-from collections import Counter, defaultdict
+import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import horary_topic_routes_v3  # noqa: F401  # activates V4 -> V5 -> V6 -> V7 -> V8
-import horary_balance_v31 as v31
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import horary_topic_routes_v3  # noqa: E402,F401  # activates V4 -> V5 -> V6 -> V7 -> V8
+import horary_balance_v31 as v31  # noqa: E402
 
 VERSION = "LUNEA_HORARY_V8_REALQA_V1"
 
