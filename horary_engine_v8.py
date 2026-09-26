@@ -294,8 +294,9 @@ def _postprocess(data: dict) -> dict:
         "d_state_must_not_be_worded_as_automatic_no": True,
     }
 
+    # V8 is a judgment layer over the V7 calculation engine. Keep the existing
+    # calculation-engine identity for compatibility and expose V8 separately.
     meta = data.setdefault("meta", {})
-    meta["horary_engine"] = VERSION
     meta["judgment_hierarchy"] = VERSION
     return data
 
