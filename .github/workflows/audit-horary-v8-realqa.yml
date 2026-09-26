@@ -1,0 +1,29 @@
+name: Audit Horary V8 Real QA
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check
+        run: python -m py_compile scripts/horary_v8_realqa.py
+      - name: Run V8 real-chart QA matrix
+        run: python scripts/horary_v8_realqa.py
+      - name: Upload QA report
+        uses: actions/upload-artifact@v4
+        with:
+          name: horary-v8-realqa
+          path: |
+            audit-output/horary-v8-realqa.json
+            audit-output/horary-v8-realqa.md
