@@ -136,7 +136,9 @@ if not getattr(v31.compute_horary, "_lunea_engine_v5", False):
     _compute_horary_v5._lunea_engine_v5 = True
     v31.compute_horary = _compute_horary_v5
 
-# V6 installs the strict aspect/perfection gate. V7 then wraps the completed
-# V6 payload with dignity, Moon-relevance, obstruction and bias guards.
+# V6 installs the strict aspect/perfection gate. V7 wraps that payload with
+# dignity, Moon-relevance, obstruction and bias guards. V8 then calibrates the
+# judgment hierarchy without changing the underlying chart calculations.
 import horary_engine_v6  # noqa: F401,E402
 import horary_engine_v7  # noqa: F401,E402
+import horary_engine_v8  # noqa: F401,E402
