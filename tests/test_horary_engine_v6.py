@@ -166,5 +166,27 @@ class HoraryEngineV6Tests(unittest.TestCase):
         self.assertNotEqual(j["traditional_core_v6"]["evidence_grade"], "A")
 
 
+    def test_future_date_window_surfaces_moon_and_significator_ingress(self):
+        data = compute(
+            "2026-09-30T15:53:00+09:00",
+            topic="stock",
+            question="10/1 내 보유주식 수익실현이 가능할까?",
+        )
+        fw = data["judgment_support"]["future_window_v1"]
+        self.assertTrue(fw["active"])
+        self.assertEqual(fw["target_date"], "2026-10-01")
+        bodies = {row["body"] for row in fw["ingresses"]}
+        self.assertIn("Moon", bodies)
+        self.assertIn("Mercury", bodies)
+        self.assertTrue(fw["moon_ingress_before_target_end"])
+        self.assertTrue(fw["moon_voc_scope_ends_before_target_end"])
+        self.assertTrue(fw["major_significator_condition_changes"])
+        self.assertTrue(fw["current_reception_not_guaranteed_through_target"])
+        self.assertTrue(fw["does_not_change_perfection"])
+        mercury = next(row for row in fw["ingresses"] if row["body"] == "Mercury")
+        self.assertEqual(mercury["from_sign_en"], "Libra")
+        self.assertEqual(mercury["to_sign_en"], "Scorpio")
+
+
 if __name__ == "__main__":
     unittest.main()

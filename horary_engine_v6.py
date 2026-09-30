@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from contextvars import ContextVar
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -639,6 +640,149 @@ def _strict_moon_course(planets, dt_utc, timezone_name):
     }
 
 
+SIGN_NAMES_KO = [
+    "양자리", "황소자리", "쌍둥이자리", "게자리", "사자자리", "처녀자리",
+    "천칭자리", "전갈자리", "사수자리", "염소자리", "물병자리", "물고기자리",
+]
+
+
+def _target_window_from_question(question_text: str, dt_utc: datetime, timezone_name: str):
+    text = str(question_text or "").strip()
+    if not text:
+        return None
+    try:
+        zone = ZoneInfo(timezone_name or "Asia/Seoul")
+    except Exception:
+        zone = ZoneInfo("Asia/Seoul")
+    local_question = dt_utc.astimezone(zone)
+    target_date = None
+    source = None
+
+    for token, days in (("모레", 2), ("내일", 1), ("오늘", 0)):
+        if token in text:
+            target_date = (local_question + timedelta(days=days)).date()
+            source = token
+            break
+
+    if target_date is None:
+        patterns = [
+            (r"(?<!\d)(20\d{2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{1,2})(?!\d)", True),
+            (r"(?<!\d)(20\d{2})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일", True),
+            (r"(?<!\d)(\d{1,2})\s*[./-]\s*(\d{1,2})(?!\d)", False),
+            (r"(?<!\d)(\d{1,2})\s*월\s*(\d{1,2})\s*일", False),
+        ]
+        for pattern, has_year in patterns:
+            m = re.search(pattern, text)
+            if not m:
+                continue
+            try:
+                if has_year:
+                    year, month, day = map(int, m.groups())
+                else:
+                    month, day = map(int, m.groups())
+                    year = local_question.year
+                    candidate = datetime(year, month, day, tzinfo=zone).date()
+                    if candidate < local_question.date() - timedelta(days=31):
+                        year += 1
+                target_date = datetime(year, month, day, tzinfo=zone).date()
+                source = m.group(0)
+                break
+            except ValueError:
+                continue
+
+    if target_date is None:
+        return None
+    start_local = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=zone)
+    end_local = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59, tzinfo=zone)
+    return {
+        "source": source,
+        "target_date": target_date.isoformat(),
+        "start_local": start_local,
+        "end_local": end_local,
+        "start_utc": start_local.astimezone(ZoneInfo("UTC")),
+        "end_utc": end_local.astimezone(ZoneInfo("UTC")),
+    }
+
+
+def _future_window_evidence(data, dt_utc: datetime, timezone_name: str, moon_course):
+    question_text = ((data.get("question") or {}).get("text") or "")
+    target = _target_window_from_question(question_text, dt_utc, timezone_name)
+    if not target or target["end_utc"] < dt_utc:
+        return {
+            "version": "LUNEA_HORARY_FUTURE_WINDOW_V1",
+            "active": False,
+            "reason": "no_future_target_window",
+            "does_not_change_perfection": True,
+        }
+
+    sig = data.get("significators") or {}
+    planets = data.get("planets") or {}
+    roles = []
+    def add_role(role, body, row):
+        if body and row:
+            roles.append((role, body, row))
+    add_role("moon", "Moon", planets.get("Moon") or sig.get("moon"))
+    add_role("querent", (sig.get("querent") or {}).get("ruler"), (sig.get("querent") or {}).get("planet"))
+    add_role("quesited", (sig.get("quesited") or {}).get("ruler"), (sig.get("quesited") or {}).get("planet"))
+    add_role("event", (sig.get("event") or {}).get("ruler"), (sig.get("event") or {}).get("planet"))
+
+    by_body = {}
+    for role, body, row in roles:
+        entry = by_body.setdefault(body, {"row": row, "roles": []})
+        if role not in entry["roles"]:
+            entry["roles"].append(role)
+
+    horizon_days = max(0.05, (target["end_utc"] - dt_utc).total_seconds() / 86400.0 + 0.05)
+    ingress_rows = []
+    for body, entry in by_body.items():
+        try:
+            ingress = _next_sign_ingress(body, entry["row"], dt_utc, horizon_days=horizon_days)
+        except Exception:
+            ingress = None
+        if not ingress:
+            continue
+        exact = _parse_utc(ingress["utc"])
+        if exact > target["end_utc"]:
+            continue
+        from_i = int(ingress.get("from_sign_index", 0)) % 12
+        to_i = int(ingress.get("to_sign_index", 0)) % 12
+        ingress_rows.append({
+            **ingress,
+            "roles": entry["roles"],
+            "time_local": _iso_local(exact, timezone_name),
+            "hours_from_question": round((exact - dt_utc).total_seconds() / 3600.0, 4),
+            "before_target_start": exact < target["start_utc"],
+            "within_target_date": target["start_utc"] <= exact <= target["end_utc"],
+            "from_sign_en": core.SIGNS_EN[from_i],
+            "to_sign_en": core.SIGNS_EN[to_i],
+            "from_sign_ko": SIGN_NAMES_KO[from_i],
+            "to_sign_ko": SIGN_NAMES_KO[to_i],
+        })
+    ingress_rows.sort(key=lambda row: row.get("hours_from_question") or 0.0)
+
+    moon_ingress = next((row for row in ingress_rows if row.get("body") == "Moon"), None)
+    major_ingress = [row for row in ingress_rows if any(r in {"querent", "quesited", "event"} for r in row.get("roles", []))]
+    return {
+        "version": "LUNEA_HORARY_FUTURE_WINDOW_V1",
+        "active": True,
+        "source": target["source"],
+        "target_date": target["target_date"],
+        "target_start_local": target["start_local"].isoformat(),
+        "target_end_local": target["end_local"].isoformat(),
+        "ingresses": ingress_rows,
+        "moon_ingress_before_target_end": bool(moon_ingress),
+        "moon_voc_scope_ends_before_target_end": bool(moon_course.get("void_of_course") and moon_ingress),
+        "major_significator_condition_changes": bool(major_ingress),
+        "current_reception_not_guaranteed_through_target": bool(major_ingress),
+        "does_not_change_perfection": True,
+        "interpretation_rules_ko": [
+            "현재 Moon VOC는 현재 별자리 이탈 전까지만 적용하며 목표기간 전체로 자동 확장하지 않습니다.",
+            "주요 시그니피케이터가 목표기간 전 또는 목표일 안에 별자리를 바꾸면 현재 dignity/reception 조건이 그대로 유지된다고 가정하지 않습니다.",
+            "Sign ingress 자체는 새로운 Perfection(성사각)이 아니며 기존 성사 판정을 자동으로 뒤집지 않습니다.",
+        ],
+    }
+
+
 def _strict_warning_flags(houses, planets, moon_course):
     warnings = []
     asc_degree = float(houses["asc"]) % 30.0
@@ -874,6 +1018,7 @@ def _postprocess(data, timezone_name):
         j["perfection"] = _strict_perfection_candidate(q["ruler"], q["planet"], t["ruler"], t["planet"], dt_utc, timezone_name)
 
     j["moon_course"] = _strict_moon_course(data.get("planets") or {}, dt_utc, timezone_name)
+    j["future_window_v1"] = _future_window_evidence(data, dt_utc, timezone_name, j["moon_course"])
     houses = {"asc": ((data.get("angles") or {}).get("ASC") or {}).get("longitude", 0.0)}
     j["warnings"] = _strict_warning_flags(houses, data.get("planets") or {}, j["moon_course"])
 
