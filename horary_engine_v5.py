@@ -142,3 +142,6 @@ if not getattr(v31.compute_horary, "_lunea_engine_v5", False):
 import horary_engine_v6  # noqa: F401,E402
 import horary_engine_v7  # noqa: F401,E402
 import horary_engine_v8  # noqa: F401,E402
+# Future Window V2 is a post-V8 evidence-only layer. It must never mutate the
+# current judgment, grade, dignity, reception, perfection, VOC or routing.
+import horary_future_window_v2  # noqa: F401,E402
