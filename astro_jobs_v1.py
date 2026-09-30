@@ -6,9 +6,9 @@ The browser starts a calculation quickly, stores the returned job id, and then
 polls this API. The calculation continues on the server even while iOS suspends
 the PWA. Results are kept in memory long enough for the client to reconnect.
 
-Long Transit / Return scans are CPU-bound on the current Render plan. Running
-several of them in parallel can saturate the service and starve interactive
-Horary requests, so background jobs are intentionally serialized here.
+Transit / Return scans are CPU-bound on the current Render plan, so those
+background jobs stay serialized. Horary gets a separate single-worker executor
+so an interactive chart cannot be starved behind a long Transit / Return scan.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -30,10 +30,10 @@ from transit_extended import MAX_TRANSIT_DAYS, scan_transits_extended
 
 JOB_TTL_SECONDS = 60 * 45
 MAX_JOBS = 64
-# Keep exactly one background calculation active on this CPU-limited service.
-# Interactive Horary now uses /v1/horary directly and must not be starved by
-# three simultaneous background scans.
+# Keep long background scans serialized on this CPU-limited service.
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lunea-astro-job")
+# Horary is resumable too, but must not queue behind Transit / Return work.
+_horary_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lunea-horary-job")
 _lock = threading.RLock()
 _jobs: dict[str, dict[str, Any]] = {}
 _router = APIRouter()
@@ -220,7 +220,8 @@ def create_astro_job(req: AstroJobRequest):
         _cleanup_locked()
         _jobs[job_id] = row
 
-    _executor.submit(_run, job_id, kind, dict(req.payload))
+    executor = _horary_executor if kind == "horary" else _executor
+    executor.submit(_run, job_id, kind, dict(req.payload))
     return _public(row)
 
 
