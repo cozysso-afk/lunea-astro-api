@@ -15,8 +15,10 @@ COPY astro_core.py astro_api.py transit_extended.py astro_performance_v2.py \
      astro_jobs_v1.py astro_job_api.py saju_core.py profile_auto_api.py vedic_core.py vedic_api.py \
      prashna_core.py prashna_api.py cross_interpretation_v2.py cross_interpretation_api_v2.py \
      horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
-     horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py ./
+     horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py \
+     horary_future_window_v2.py ./
 COPY tests/test_horary_engine_v7.py tests/test_horary_engine_v8.py tests/test_horary_patterns_real_v7.py \
+     tests/test_horary_future_window_v2.py \
      tests/test_saju_core_v1.py tests/test_vedic_core_v1.py tests/test_prashna_core_v1.py \
      tests/test_cross_interpretation_v2.py ./tests/
 
@@ -103,11 +105,12 @@ assert 'moon_event_testimony_v8' in soft['judgment_support']['traditional_core_v
 print('Horary V8 deployment sentinels OK: V7 core + V8 hierarchy / negative / soft-positive / hard-positive / separating / Moon event distinction')
 PY
 
-# Production builds execute Horary V7/V8 plus the independent Saju / Vedic / Prashna contracts.
+# Production builds execute Horary V7/V8 + Future Window V2 plus independent contracts.
 RUN python -m unittest -v \
     tests.test_horary_engine_v7 \
     tests.test_horary_engine_v8 \
     tests.test_horary_patterns_real_v7 \
+    tests.test_horary_future_window_v2 \
     tests.test_saju_core_v1 \
     tests.test_vedic_core_v1 \
     tests.test_prashna_core_v1 \
