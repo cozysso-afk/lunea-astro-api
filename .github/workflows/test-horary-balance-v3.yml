@@ -2,7 +2,7 @@ name: Test Horary Balance V3
 
 on:
   push:
-    branches: [main, feature/horary-balance-v3, feat/horary-balance-v3-1, feat/thai-taksa-range-v18, fix/horary-engine-moiety-sect-golden-20260905]
+    branches: [main, feature/horary-balance-v3, feat/horary-balance-v3-1, feat/thai-taksa-range-v18, fix/horary-engine-moiety-sect-golden-20260905, feat/horary-v2-judgment-structure]
   pull_request:
     branches: [main]
 
@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Syntax check
-        run: python -m py_compile astro_api.py astro_core.py horary_balance_v3.py horary_balance_v31.py horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py vedic_core.py vedic_api.py prashna_core.py prashna_api.py cross_interpretation_v2.py cross_interpretation_api_v2.py
+        run: python -m py_compile astro_api.py astro_core.py horary_balance_v3.py horary_balance_v31.py horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py horary_future_window_v2.py horary_judgment_v2.py vedic_core.py vedic_api.py prashna_core.py prashna_api.py cross_interpretation_v2.py cross_interpretation_api_v2.py tests/test_horary_judgment_v2.py
       - name: Horary V3 regression tests
         run: python -m unittest -v tests.test_horary_balance_v3
       - name: Horary V3.1 traditional-pattern tests
@@ -33,6 +33,8 @@ jobs:
         run: python -m unittest -v tests.test_horary_engine_v7
       - name: Horary V8 judgment-hierarchy tests
         run: python -m unittest -v tests.test_horary_engine_v8
+      - name: Horary V2 judgment/evidence schema tests
+        run: python -m unittest -v tests.test_horary_judgment_v2
       - name: Real ephemeris translation/collection/intervention goldens
         run: python -m unittest -v tests.test_horary_patterns_real_v7
       - name: Thai Taksa range calendar tests
