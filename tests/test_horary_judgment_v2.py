@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 import horary_topic_routes_v3  # noqa: F401  # activates V4 -> V5 -> V6 -> V7 -> V8 -> FW V2 -> Judgment V2
@@ -100,6 +101,24 @@ class HoraryJudgmentV2Tests(unittest.TestCase):
         self.assertFalse(v2["reception"]["modifiesPerfection"])
         self.assertIsNone(v2["confidence"]["probabilityPercent"])
         self.assertTrue(v2["aiInterpretationGuardrails"]["evidencePathRequired"])
+
+        print("HORARY_V2_CASE_B_JSON=" + json.dumps({
+            "horaryRuleset": v2["horaryRuleset"],
+            "questionIntent": v2["questionIntent"],
+            "judgmentAxis": v2["judgmentAxis"],
+            "currentJudgment": v2["currentJudgment"],
+            "mercuryVenus": pair,
+            "voc": v2["voc"],
+            "moonFlow": v2["moonFlow"],
+            "futureDevelopment": {
+                "start": fw["start"],
+                "end": fw["end"],
+                "dailySnapshots": fw["dailySnapshots"],
+            },
+            "perfection": v2["perfection"],
+            "reception": v2["reception"],
+            "confidence": v2["confidence"],
+        }, ensure_ascii=False, default=str))
 
     def test_ruleset_preserves_existing_orb_policy_and_excludes_modern_bodies(self):
         data = calc(v31.compute_horary, "10/1 내 보유주식 수익실현이 가능할까?", "2026-09-30T15:53:00+09:00")
