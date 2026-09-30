@@ -16,9 +16,9 @@ COPY astro_core.py astro_api.py transit_extended.py astro_performance_v2.py \
      prashna_core.py prashna_api.py cross_interpretation_v2.py cross_interpretation_api_v2.py \
      horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
      horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py \
-     horary_future_window_v2.py ./
+     horary_future_window_v2.py horary_judgment_v2.py ./
 COPY tests/test_horary_engine_v7.py tests/test_horary_engine_v8.py tests/test_horary_patterns_real_v7.py \
-     tests/test_horary_future_window_v2.py \
+     tests/test_horary_future_window_v2.py tests/test_horary_judgment_v2.py \
      tests/test_saju_core_v1.py tests/test_vedic_core_v1.py tests/test_prashna_core_v1.py \
      tests/test_cross_interpretation_v2.py ./tests/
 
@@ -51,6 +51,8 @@ d = calc(
 j = d['judgment_support']
 assert d['meta']['horary_engine'] == 'LUNEA_HORARY_ENGINE_V7_BALANCE_GUARDS'
 assert d['meta']['judgment_hierarchy'] == 'LUNEA_HORARY_ENGINE_V8_JUDGMENT_HIERARCHY'
+assert d['meta']['horary_judgment_schema'] == 'LUNEA_HORARY_V2_JUDGMENT_SCHEMA'
+assert j['horary_v2']['horaryRuleset']['id'] == 'HORARY_V2_TRADITIONAL'
 assert j['perfection']['perfects'] is False
 assert j['perfection']['reason'] == 'out_of_orb_no_active_perfection'
 assert j['primary_connection']['traditional_valid_aspect'] is None
@@ -102,15 +104,16 @@ assert 'moon_relevance_v7' in soft['judgment_support']
 assert 'question_relevant' in soft['judgment_support']['moon_relevance_v7']
 assert 'moon_event_testimony_v8' in soft['judgment_support']['traditional_core_v8']
 
-print('Horary V8 deployment sentinels OK: V7 core + V8 hierarchy / negative / soft-positive / hard-positive / separating / Moon event distinction')
+print('Horary V2 deployment sentinels OK: legacy V7/V8 preserved + V2 evidence schema')
 PY
 
-# Production builds execute Horary V7/V8 + Future Window V2 plus independent contracts.
+# Production builds execute Horary V7/V8 + Future Window V2 + Judgment V2 plus independent contracts.
 RUN python -m unittest -v \
     tests.test_horary_engine_v7 \
     tests.test_horary_engine_v8 \
     tests.test_horary_patterns_real_v7 \
     tests.test_horary_future_window_v2 \
+    tests.test_horary_judgment_v2 \
     tests.test_saju_core_v1 \
     tests.test_vedic_core_v1 \
     tests.test_prashna_core_v1 \
