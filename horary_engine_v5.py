@@ -90,7 +90,7 @@ def _is_day_chart_altitude(data):
 def _recompute_part_of_fortune(data, sect):
     planets = (data or {}).get("planets") or {}
     angles = (data or {}).get("angles") or {}
-    cusps = data.get("cusps") or []
+    cusps = (data or {}).get("cusps") or []
     asc = (angles.get("ASC") or {}).get("longitude")
     sun_lon = (planets.get("Sun") or {}).get("longitude")
     moon_lon = (planets.get("Moon") or {}).get("longitude")
