@@ -166,6 +166,19 @@ def _planet_row(data, body: str):
     return None
 
 
+def _station_kind(station: dict) -> str:
+    speed_before = float(station.get("speed_before") or 0.0)
+    speed_after = float(station.get("speed_after") or 0.0)
+    if speed_before > 0.0 and speed_after < 0.0:
+        return "retrograde_station"
+    if speed_before < 0.0 and speed_after > 0.0:
+        return "direct_station"
+    # The V6 station finder can return very small post-station speeds that sit
+    # inside STATION_SPEED_EPS. Direction is a sign-change property, so do not
+    # reclassify a negative post-station speed as direct merely for being slow.
+    return "retrograde_station" if speed_after < 0.0 else "direct_station"
+
+
 def _interruption_events_before_exact(data, pair: dict, exact_dt: datetime, dt_utc: datetime, timezone_name: str):
     out = []
     span_days = max(1.0, (exact_dt - dt_utc).total_seconds() / 86400.0 + 0.2)
@@ -201,7 +214,6 @@ def _interruption_events_before_exact(data, pair: dict, exact_dt: datetime, dt_u
             if station and station.get("utc"):
                 when = _utc(station["utc"])
                 if when < exact_dt:
-                    speed_after = float(station.get("speed_after") or 0.0)
                     breaks = None
                     if angle is not None:
                         try:
@@ -211,7 +223,7 @@ def _interruption_events_before_exact(data, pair: dict, exact_dt: datetime, dt_u
                             breaks = None
                     out.append({
                         "type": "station",
-                        "stationKind": "retrograde_station" if speed_after < -v6.STATION_SPEED_EPS else "direct_station",
+                        "stationKind": _station_kind(station),
                         "body": body,
                         "body_ko": core.PLANET_KO.get(body, body),
                         "time_local": _local(when, timezone_name),
