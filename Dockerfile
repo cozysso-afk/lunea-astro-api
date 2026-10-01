@@ -16,7 +16,7 @@ COPY astro_core.py astro_api.py transit_extended.py astro_performance_v2.py \
      prashna_core.py prashna_api.py cross_interpretation_v2.py cross_interpretation_api_v2.py \
      horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
      horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py \
-     horary_future_window_v2.py horary_judgment_v2.py ./
+     horary_future_window_v2.py horary_future_window_v21.py horary_judgment_v2.py ./
 COPY tests/test_horary_engine_v7.py tests/test_horary_engine_v8.py tests/test_horary_patterns_real_v7.py \
      tests/test_horary_future_window_v2.py tests/test_horary_judgment_v2.py \
      tests/test_saju_core_v1.py tests/test_vedic_core_v1.py tests/test_prashna_core_v1.py \
@@ -86,7 +86,7 @@ hc = hard['judgment_support']['traditional_core_v8']
 assert hp['perfects'] is True
 assert hp['aspect']['traditional_valid_aspect'] == 'square'
 assert hp['aspect']['traditional_state'] == 'valid_applying'
-assert str(hc['qualified_evidence_grade_v8']).startswith('A')
+assert str(hc['qualified_evidence_grade_v8']).startswith('A_')
 assert hc['direct_aspect_tone_v7'] == 'frictional'
 
 # Separating sentinel: within-orb geometry is not a fresh perfection.
