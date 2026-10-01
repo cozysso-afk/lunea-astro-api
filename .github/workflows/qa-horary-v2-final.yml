@@ -1,0 +1,25 @@
+name: QA Horary V2 Final
+
+on:
+  push:
+    branches:
+      - qa/horary-v2-final-fdf311e
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Syntax check
+        run: python -m py_compile horary_engine_v5.py horary_future_window_v21.py horary_judgment_v2.py
+      - name: Preserve V5 behavior
+        run: python -m unittest -v tests.test_horary_engine_v5
+      - name: Future Window V2.1
+        run: python -m unittest -v tests.test_horary_future_window_v2
+      - name: Horary V2 judgment schema
+        run: python -m unittest -v tests.test_horary_judgment_v2
