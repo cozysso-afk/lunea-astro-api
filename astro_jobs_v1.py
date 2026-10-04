@@ -13,6 +13,8 @@ so an interactive chart cannot be starved behind a long Transit / Return scan.
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import hashlib
+import json
 import re
 import secrets
 import threading
@@ -65,6 +67,31 @@ def _coordinates_from_place(place: Any) -> tuple[float | None, float | None]:
     if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
         return None, None
     return lat, lon
+
+
+def _job_fingerprint(kind: str, payload: dict[str, Any]) -> str:
+    """Stable request identity used only to avoid duplicate active Horary work."""
+    canonical = json.dumps(
+        {"kind": str(kind or "").strip().lower(), "payload": payload or {}},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _find_active_duplicate_locked(kind: str, fingerprint: str):
+    if kind != "horary" or not fingerprint:
+        return None
+    for row in _jobs.values():
+        if (
+            row.get("kind") == "horary"
+            and row.get("fingerprint") == fingerprint
+            and row.get("status") in {"queued", "running"}
+        ):
+            return row
+    return None
 
 
 def _cleanup_locked() -> None:
@@ -202,26 +229,33 @@ def create_astro_job(req: AstroJobRequest):
     if kind not in {"horary", "transit", "return"}:
         raise HTTPException(status_code=422, detail="지원하지 않는 Astro job 종류입니다.")
 
-    job_id = secrets.token_urlsafe(12)
-    now = time.time()
-    row = {
-        "job_id": job_id,
-        "kind": kind,
-        "status": "queued",
-        "created_at": _now_iso(),
-        "created_ts": now,
-        "updated_ts": now,
-        "started_at": None,
-        "finished_at": None,
-        "result": None,
-        "error": None,
-    }
+    payload = dict(req.payload)
+    fingerprint = _job_fingerprint(kind, payload) if kind == "horary" else ""
     with _lock:
         _cleanup_locked()
+        duplicate = _find_active_duplicate_locked(kind, fingerprint)
+        if duplicate is not None:
+            return _public(duplicate)
+
+        job_id = secrets.token_urlsafe(12)
+        now = time.time()
+        row = {
+            "job_id": job_id,
+            "kind": kind,
+            "fingerprint": fingerprint or None,
+            "status": "queued",
+            "created_at": _now_iso(),
+            "created_ts": now,
+            "updated_ts": now,
+            "started_at": None,
+            "finished_at": None,
+            "result": None,
+            "error": None,
+        }
         _jobs[job_id] = row
 
     executor = _horary_executor if kind == "horary" else _executor
-    executor.submit(_run, job_id, kind, dict(req.payload))
+    executor.submit(_run, job_id, kind, payload)
     return _public(row)
 
 
