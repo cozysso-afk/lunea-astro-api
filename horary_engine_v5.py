@@ -145,3 +145,10 @@ import horary_engine_v8  # noqa: F401,E402
 # Future Window V2 is a post-V8 evidence-only layer. It must never mutate the
 # current judgment, grade, dignity, reception, perfection, VOC or routing.
 import horary_future_window_v2  # noqa: F401,E402
+# V2.1 closes completeness gaps in the Future Window evidence only: every
+# target-intersecting Moon sign segment is scanned through sign exit, and
+# current-orb vs target-window-orb states are kept explicit.
+import horary_future_window_v21  # noqa: F401,E402
+# HORARY V2 adds a normalized judgment/evidence schema only. It consumes the
+# existing V6/V7/V8 + Future Window output and does not mutate those decisions.
+import horary_judgment_v2  # noqa: F401,E402
