@@ -136,25 +136,10 @@ if not getattr(v31.compute_horary, "_lunea_engine_v5", False):
     _compute_horary_v5._lunea_engine_v5 = True
     v31.compute_horary = _compute_horary_v5
 
-# V6 installs the strict aspect/perfection gate. V7 wraps that payload with
-# dignity, Moon-relevance, obstruction and bias guards. V8 then calibrates the
-# judgment hierarchy without changing the underlying chart calculations.
-import horary_engine_v6  # noqa: F401,E402
-import horary_engine_v7  # noqa: F401,E402
-import horary_engine_v8  # noqa: F401,E402
-# Future Window V2 is a post-V8 evidence-only layer. It must never mutate the
-# current judgment, grade, dignity, reception, perfection, VOC or routing.
-import horary_future_window_v2  # noqa: F401,E402
-# V2.1 closes completeness gaps in the Future Window evidence only: every
-# target-intersecting Moon sign segment is scanned through sign exit, and
-# current-orb vs target-window-orb states are kept explicit.
-import horary_future_window_v21  # noqa: F401,E402
-# HORARY V2 adds a normalized judgment/evidence schema only. It consumes the
-# existing V6/V7/V8 + Future Window output and does not mutate those decisions.
-import horary_judgment_v2  # noqa: F401,E402
-# Hotspot V2 installs before V1 memoization so the existing V1 caches memoize
-# the vectorized station implementation as well. No search policy is changed.
-import horary_performance_v2  # noqa: F401,E402
-# Performance-only memoization installs last so every V6 consumer above shares
-# identical ephemeris scan results without changing any judgment policy.
-import horary_performance_v1  # noqa: F401,E402
+# ROLLBACK FAST PATH
+# ------------------
+# V6 and the later V7/V8/Future/Judgment layers are intentionally not imported
+# into the production Horary chain here. The historical V5 chain was the last
+# fast path before the strict V6 ephemeris-event scans were activated. Keeping
+# the newer modules in the repository preserves them for QA/rework without
+# paying their repeated future-scan cost on every interactive Horary request.
