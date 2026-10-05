@@ -152,6 +152,9 @@ import horary_future_window_v21  # noqa: F401,E402
 # HORARY V2 adds a normalized judgment/evidence schema only. It consumes the
 # existing V6/V7/V8 + Future Window output and does not mutate those decisions.
 import horary_judgment_v2  # noqa: F401,E402
-# Performance-only memoization installs last so every V6 consumer above shares
-# identical ephemeris scan results without changing any judgment policy.
+# Vector scan installs before memoization: it preserves the exact V6 search
+# grid/refinement policy while batching coarse ephemeris samples.
+import horary_performance_v2  # noqa: F401,E402
+# Memoization installs last so repeated identical vector-scan results are
+# reused across every V6/Future/Judgment consumer.
 import horary_performance_v1  # noqa: F401,E402
