@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import horary_topic_routes_v3  # noqa: E402,F401  # activates V4 -> V5 -> V6 -> V7 -> V8
+import horary_topic_routes_v3  # noqa: E402,F401  # production installs V4 -> V5 only
+import horary_engine_v8  # noqa: E402,F401  # advanced QA explicitly activates V6 -> V7 -> V8
 import horary_balance_v31 as v31  # noqa: E402
 
 VERSION = "LUNEA_HORARY_V8_REALQA_V1"
@@ -65,7 +66,7 @@ def compute_cell(topic: str, location_key: str, date_s: str, time_s: str) -> dic
     route = j.get("route_contract_v7") or {}
 
     if not v8:
-        raise AssertionError("V8 judgment hierarchy missing from live calculation chain")
+        raise AssertionError("V8 judgment hierarchy missing from explicit V8 QA calculation chain")
     if route and route.get("matches_spec") is not True:
         raise AssertionError(f"route contract mismatch for {topic}: {route}")
 

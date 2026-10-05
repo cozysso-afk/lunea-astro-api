@@ -5,10 +5,13 @@ import pstats
 import time
 
 import astro_core as core
-import horary_topic_routes_v3  # noqa: F401 - install production Horary chain
+import horary_topic_routes_v3  # noqa: F401 - production installs V4 -> V5 only
+import horary_engine_v8  # noqa: F401 - diagnostic explicitly activates V6 -> V7 -> V8
+import horary_future_window_v21  # noqa: F401 - diagnostic advanced evidence layer
+import horary_judgment_v2  # noqa: F401 - diagnostic normalized judgment layer
 import horary_balance_v31 as v31
-import horary_performance_v1 as perf1
 import horary_performance_v2 as perf2
+import horary_performance_v1 as perf1
 
 
 LAT = 34.7594

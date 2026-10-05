@@ -47,10 +47,10 @@ def base_data(primary, reception=None, *, primary_connection=None, moon=None, ev
 
 class HoraryBalanceV3Tests(unittest.TestCase):
     def test_production_patch_rejects_out_of_orb_future_perfection(self):
-        # Legacy V3 used to search forward from an out-of-orb geometric aspect
-        # and could promote it to direct perfection. The production import chain
-        # now patches this entry point with Strict V6, so this regression test
-        # intentionally proves that the old behavior can no longer return.
+        # The production chain now intentionally stops at the historical V5
+        # fast path. For this sentinel V3/V5 still rejects the geometric
+        # out-of-orb candidate because a significator changes sign first; the
+        # V6-only reason/perfection-check metadata is no longer production data.
         dt = datetime(2026, 9, 2, tzinfo=UTC)
         row_a = planet(0.0, 1.0)
         row_b = planet(80.0, 0.2)
@@ -75,9 +75,8 @@ class HoraryBalanceV3Tests(unittest.TestCase):
             )
 
         self.assertFalse(result["perfects"])
-        self.assertEqual(result["reason"], "out_of_orb_no_active_perfection")
-        self.assertFalse(result["perfection_check_started"])
-        self.assertFalse(result["refranation_applicable"])
+        self.assertEqual(result["reason"], "sign_change_before_perfection")
+        self.assertFalse(result["before_sign_change"])
 
     def test_hard_perfection_with_mutual_reception_is_not_negative(self):
         primary = {

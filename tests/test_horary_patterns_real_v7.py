@@ -5,9 +5,10 @@ from datetime import datetime
 import unittest
 
 import astro_core as core
-import horary_topic_routes_v3  # noqa: F401  # installs V4 -> V5 -> V6 -> V7
+import horary_topic_routes_v3  # noqa: F401  # production installs V4 -> V5 only
 import horary_balance_v31 as v31
 import horary_engine_v6 as v6
+import horary_engine_v7 as v7  # noqa: F401  # advanced QA activates V6 -> V7 explicitly
 
 
 LAT = 34.7594

@@ -1,0 +1,42 @@
+name: QA Horary V5 Rollback
+
+on:
+  push:
+    branches: [fix/horary-rollback-v5-fastpath]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'horary_engine_v5.py'
+      - 'cross_interpretation_v5_compat.py'
+      - 'cross_interpretation_api_v2.py'
+      - 'Dockerfile'
+      - 'tests/test_horary_v5_fastpath_rollback.py'
+      - 'tests/test_cross_interpretation_v5_compat.py'
+      - '.github/workflows/qa-horary-v5-rollback.yml'
+
+jobs:
+  rollback-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check rollback path
+        run: >-
+          python -m py_compile
+          horary_engine_v5.py
+          cross_interpretation_v5_compat.py
+          cross_interpretation_api_v2.py
+          tests/test_horary_v5_fastpath_rollback.py
+          tests/test_cross_interpretation_v5_compat.py
+      - name: Time production V5 Horary path
+        run: python -m tests.test_horary_v5_fastpath_rollback
+      - name: Cross V2 compatibility on V5 fast path
+        run: python -m unittest -v tests.test_cross_interpretation_v5_compat
+      - name: Build production rollback image
+        run: docker build -t lunea-astro-api:v5-rollback .
