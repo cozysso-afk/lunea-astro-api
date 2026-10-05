@@ -36,4 +36,4 @@ jobs:
       - name: Time production V5 Horary path
         run: python -m tests.test_horary_v5_fastpath_rollback
       - name: Cross V2 compatibility on V5 fast path
-        run: python -m pytest -q tests/test_cross_interpretation_v5_compat.py
+        run: python -m unittest -v tests.test_cross_interpretation_v5_compat
