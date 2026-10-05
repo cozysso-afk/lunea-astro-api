@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import swisseph as swe
 
 import astro_core as core
-import horary_topic_routes_v3  # noqa: F401  # activates V4 + V5 + V6 + V7 chain
+import horary_topic_routes_v3  # noqa: F401  # activates V4 + production V5 fast path
 import horary_balance_v31 as v31
 
 
@@ -61,7 +61,7 @@ class HoraryEngineV5Tests(unittest.TestCase):
         self.assertLess(angular_error(result["planets"]["Sun"]["longitude"], 162.390095), 0.12)
         self.assertLess(angular_error(result["planets"]["Moon"]["longitude"], 80.259002), 0.12)
 
-        self.assertEqual(result["meta"]["horary_engine"], "LUNEA_HORARY_ENGINE_V7_BALANCE_GUARDS")
+        self.assertEqual(result["meta"]["horary_engine"], "LUNEA_HORARY_ENGINE_V5_MOIETY_SECT")
         self.assertEqual(result["meta"]["aspect_orb_policy"]["method"], "planetary_moiety_sum")
         self.assertFalse(result["meta"]["sect"]["fallback"])
 
