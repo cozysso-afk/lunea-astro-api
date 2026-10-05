@@ -97,11 +97,10 @@ RUN python -m unittest -v \
     tests.test_saju_core_v1 \
     tests.test_vedic_core_v1 \
     tests.test_prashna_core_v1 \
-    tests.test_cross_interpretation_v2
+    tests.test_cross_interpretation_v2 \
+    tests.test_cross_interpretation_v5_compat
 
-RUN python -m pytest -q \
-    tests/test_horary_v5_fastpath_rollback.py \
-    tests/test_cross_interpretation_v5_compat.py
+RUN python -m tests.test_horary_v5_fastpath_rollback
 
 ENV PORT=10000
 EXPOSE 10000
