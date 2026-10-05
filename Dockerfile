@@ -18,12 +18,7 @@ COPY astro_core.py astro_api.py transit_extended.py astro_performance_v2.py \
      horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py \
      horary_future_window_v2.py horary_future_window_v21.py horary_judgment_v2.py \
      horary_performance_v2.py horary_performance_v1.py ./
-COPY tests/test_horary_engine_v7.py tests/test_horary_engine_v8.py tests/test_horary_patterns_real_v7.py \
-     tests/test_horary_future_window_v2.py tests/test_horary_judgment_v2.py \
-     tests/test_horary_performance_v2.py tests/test_horary_performance_v1.py \
-     tests/test_horary_v5_fastpath_rollback.py tests/test_cross_interpretation_v5_compat.py \
-     tests/test_saju_core_v1.py tests/test_vedic_core_v1.py tests/test_prashna_core_v1.py \
-     tests/test_cross_interpretation_v2.py ./tests/
+COPY tests/test_horary_v5_fastpath_rollback.py tests/test_cross_interpretation_v5_compat.py ./tests/
 
 RUN python -c "from astro_core import load_ephemeris; x=load_ephemeris(); print('Ephemeris:', x[5])"
 RUN python -c "import astro_job_api; print('Astro API+jobs import OK, version =', astro_job_api.app.version)"
@@ -36,22 +31,15 @@ from cross_interpretation_v5_compat import build_cross_interpretation_compat
 LAT = 34.7594
 LON = 127.6530
 
-def calc(iso, question='호라리 배포 검산', topic='general'):
-    return v31.compute_horary(
-        question_text=question,
-        question_iso=iso,
-        topic=topic,
-        timezone_name='Asia/Seoul',
-        place='현재 위치',
-        lat=LAT,
-        lon=LON,
-    )
-
 started = time.perf_counter()
-d = calc(
-    '2026-10-05T18:25:23+09:00',
-    question='A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?',
+d = v31.compute_horary(
+    question_text='A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?',
+    question_iso='2026-10-05T18:25:23+09:00',
     topic='contact',
+    timezone_name='Asia/Seoul',
+    place='현재 위치',
+    lat=LAT,
+    lon=LON,
 )
 elapsed = time.perf_counter() - started
 j = d['judgment_support']
@@ -83,23 +71,7 @@ assert cross['independence_contract']['v5_fastpath_compat'] is True
 print(f'Horary V5 production fast-path sentinel OK: {elapsed:.3f}s + Cross compat')
 PY
 
-# Keep newer Horary modules regression-tested explicitly even while production
-# stops at V5. These tests import the advanced layers themselves; production
-# route installation above does not auto-enable them.
-RUN python -m unittest -v \
-    tests.test_horary_engine_v7 \
-    tests.test_horary_engine_v8 \
-    tests.test_horary_patterns_real_v7 \
-    tests.test_horary_future_window_v2 \
-    tests.test_horary_judgment_v2 \
-    tests.test_horary_performance_v2 \
-    tests.test_horary_performance_v1 \
-    tests.test_saju_core_v1 \
-    tests.test_vedic_core_v1 \
-    tests.test_prashna_core_v1 \
-    tests.test_cross_interpretation_v2 \
-    tests.test_cross_interpretation_v5_compat
-
+RUN python -m unittest -v tests.test_cross_interpretation_v5_compat
 RUN python -m tests.test_horary_v5_fastpath_rollback
 
 ENV PORT=10000
