@@ -1,0 +1,21 @@
+name: Profile Horary Hotspots V2
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check profiler
+        run: python -m py_compile tests/profile_horary_hotspots_v2.py horary_performance_v2.py
+      - name: Run cold Horary hotspot profile V2
+        run: python -m tests.profile_horary_hotspots_v2
