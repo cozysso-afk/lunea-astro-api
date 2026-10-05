@@ -18,9 +18,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Syntax check
-        run: python -m py_compile astro_api.py astro_core.py astro_jobs_v1.py horary_balance_v3.py horary_balance_v31.py horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py horary_future_window_v2.py horary_future_window_v21.py horary_judgment_v2.py horary_performance_v1.py vedic_core.py vedic_api.py prashna_core.py prashna_api.py cross_interpretation_v2.py cross_interpretation_api_v2.py tests/test_horary_future_window_v2.py tests/test_horary_judgment_v2.py tests/test_horary_performance_v1.py tests/profile_horary_hotspots_v1.py
-      - name: Horary cold one-shot hotspot profile
-        run: python -m tests.profile_horary_hotspots_v1
+        run: python -m py_compile astro_api.py astro_core.py astro_jobs_v1.py horary_balance_v3.py horary_balance_v31.py horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py horary_future_window_v2.py horary_future_window_v21.py horary_judgment_v2.py horary_performance_v1.py vedic_core.py vedic_api.py prashna_core.py prashna_api.py cross_interpretation_v2.py cross_interpretation_api_v2.py tests/test_horary_future_window_v2.py tests/test_horary_judgment_v2.py tests/test_horary_performance_v1.py
       - name: Horary V3 regression tests
         run: python -m unittest -v tests.test_horary_balance_v3
       - name: Horary V3.1 traditional-pattern tests
