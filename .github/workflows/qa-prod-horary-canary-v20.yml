@@ -9,68 +9,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Submit and poll production Horary job
+      - name: Time direct V2 Horary route
         shell: bash
         run: |
           python - <<'PY'
           import json
           import time
           import urllib.request
-          from datetime import datetime
 
-          BASE = "https://lunea-astro-api.onrender.com"
+          URL = "https://lunea-astro-api-v2.onrender.com/v1/horary"
           payload = {
-              "kind": "horary",
-              "payload": {
-                  "question_text": "A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?",
-                  "question_iso": "2026-10-05T18:25:23+09:00",
-                  "topic": "contact",
-                  "timezone": "Asia/Seoul",
-                  "place": "현재 위치",
-                  "lat": 34.7594,
-                  "lon": 127.6530,
-              },
+              "question_text": "A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?",
+              "question_iso": "2026-10-05T18:25:23+09:00",
+              "topic": "contact",
+              "timezone": "Asia/Seoul",
+              "place": "현재 위치",
+              "lat": 34.7594,
+              "lon": 127.6530,
           }
 
-          def request_json(url, method="GET", body=None):
-              data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
-              req = urllib.request.Request(url, data=data, method=method)
-              req.add_header("Content-Type", "application/json")
-              with urllib.request.urlopen(req, timeout=30) as resp:
-                  return resp.status, json.loads(resp.read().decode("utf-8"))
-
+          body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+          req = urllib.request.Request(URL, data=body, method="POST")
+          req.add_header("Content-Type", "application/json")
+          req.add_header("Accept", "application/json")
           t0 = time.monotonic()
-          wall0 = datetime.now().astimezone().isoformat()
-          status, created = request_json(BASE + "/v1/jobs/astro", "POST", payload)
-          submit_elapsed = time.monotonic() - t0
-          job_id = created["job_id"]
-          print(f"CANARY_HTTP_STATUS={status}")
-          print(f"CANARY_CLIENT_STARTED_AT={wall0}")
-          print(f"CANARY_SUBMIT_SECONDS={submit_elapsed:.6f}")
-          print(f"CANARY_JOB_ID={job_id}")
-          print(f"CANARY_INITIAL_STATUS={created.get('status')}")
-          print(f"CANARY_SERVER_CREATED_AT={created.get('created_at')}")
-
-          deadline = t0 + 360.0
-          polls = 0
-          final = created
-          while time.monotonic() < deadline:
-              polls += 1
-              _, final = request_json(BASE + f"/v1/jobs/astro/{job_id}")
-              if final.get("status") in {"done", "error"}:
-                  break
-              time.sleep(1.0)
-          total = time.monotonic() - t0
-          print(f"CANARY_POLLS={polls}")
-          print(f"CANARY_FINAL_STATUS={final.get('status')}")
-          print(f"CANARY_SERVER_STARTED_AT={final.get('started_at')}")
-          print(f"CANARY_SERVER_FINISHED_AT={final.get('finished_at')}")
-          print(f"CANARY_TOTAL_SECONDS={total:.6f}")
-          if final.get("error"):
-              print(f"CANARY_ERROR={final.get('error')}")
-          if final.get("status") != "done":
-              raise SystemExit(f"production Horary canary did not complete: {final.get('status')}")
-          result = final.get("result") or {}
-          assert result.get("schema") == "LUNEA_HORARY_V1", result.get("schema")
-          assert (result.get("judgment_support") or {}).get("horary_v2")
+          with urllib.request.urlopen(req, timeout=360) as resp:
+              data = json.loads(resp.read().decode("utf-8"))
+              elapsed = time.monotonic() - t0
+              print(f"V2_DIRECT_HTTP_STATUS={resp.status}")
+              print(f"V2_DIRECT_TOTAL_SECONDS={elapsed:.6f}")
+          assert data.get("schema") == "LUNEA_HORARY_V1", data.get("schema")
+          assert (data.get("judgment_support") or {}).get("horary_v2")
           PY
