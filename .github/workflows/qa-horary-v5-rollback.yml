@@ -25,4 +25,4 @@ jobs:
       - name: Syntax check rollback path
         run: python -m py_compile horary_engine_v5.py tests/test_horary_v5_fastpath_rollback.py
       - name: Time production V5 Horary path
-        run: python tests/test_horary_v5_fastpath_rollback.py
+        run: python -m tests.test_horary_v5_fastpath_rollback
