@@ -1,8 +1,7 @@
 name: QA Production Horary Canary V20
 
 on:
-  push:
-    branches: [qa/prod-horary-canary-v20]
+  workflow_dispatch:
 
 jobs:
   canary:
