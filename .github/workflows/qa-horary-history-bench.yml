@@ -12,16 +12,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: sep22
-            ref: 6c39b00c53ddbec39523fc206042b8f685a45601
-          - label: sep26_v8
-            ref: 8f982d81d070f3d0ce3b0451bee3bca43d3630cd
-          - label: sep30_future
-            ref: dee4cc76eb3491fed3bde927f6ef02a7f66f5aed
-          - label: sep30_judgment_v2
-            ref: 1090a6c95213ea0e8ec3c0515e9a802e7905d810
-          - label: current
-            ref: 91a6a8d455a06b0425fcd65691ea24bcc037bb11
+          - label: pre_v6
+            ref: 82742092048f85f763441214eb942ae7a3f7fada
+          - label: v6_initial
+            ref: 94a84f63348d1df621301497d21b549f26664e60
+          - label: v7_initial
+            ref: 7c086bebffaa2f2869c014106ded9c1680adf0cd
+          - label: v7_fix
+            ref: b09ef8fefcf75e7bf659cb06b4157d5540379e42
     steps:
       - uses: actions/checkout@v4
         with:
