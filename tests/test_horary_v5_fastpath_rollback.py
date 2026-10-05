@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import astro_core as core
 import horary_topic_routes_v3  # noqa: F401 - installs production V4 -> V5 chain
