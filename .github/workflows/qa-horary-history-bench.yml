@@ -1,0 +1,60 @@
+name: QA Horary History Bench
+
+on:
+  push:
+    branches: [qa/prod-horary-canary-v20]
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: sep22
+            ref: 6c39b00c53ddbec39523fc206042b8f685a45601
+          - label: sep26_v8
+            ref: 8f982d81d070f3d0ce3b0451bee3bca43d3630cd
+          - label: sep30_future
+            ref: dee4cc76eb3491fed3bde927f6ef02a7f66f5aed
+          - label: sep30_judgment_v2
+            ref: 1090a6c95213ea0e8ec3c0515e9a802e7905d810
+          - label: current
+            ref: 91a6a8d455a06b0425fcd65691ea24bcc037bb11
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -r requirements.txt
+      - name: Time one Horary
+        shell: bash
+        run: |
+          python - <<'PY'
+          import time
+          import astro_core as core
+          core.load_ephemeris()
+          try:
+              import horary_topic_routes_v3  # noqa
+          except Exception:
+              pass
+          from horary_balance_v31 import compute_horary
+          t0=time.perf_counter()
+          data=compute_horary(
+              question_text='A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?',
+              question_iso='2026-10-05T18:25:23+09:00',
+              topic='contact',
+              timezone_name='Asia/Seoul',
+              place='현재 위치',
+              lat=34.7594,
+              lon=127.6530,
+          )
+          elapsed=time.perf_counter()-t0
+          print('HISTORY_LABEL=${{ matrix.label }}')
+          print(f'HISTORY_TOTAL_SECONDS={elapsed:.6f}')
+          print('HISTORY_SCHEMA=' + str(data.get('schema')))
+          PY
