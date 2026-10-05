@@ -16,9 +16,9 @@ COPY astro_core.py astro_api.py transit_extended.py astro_performance_v2.py \
      prashna_core.py prashna_api.py cross_interpretation_v2.py cross_interpretation_api_v2.py \
      horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
      horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py \
-     horary_future_window_v2.py horary_future_window_v21.py horary_judgment_v2.py horary_performance_v1.py ./
+     horary_future_window_v2.py horary_future_window_v21.py horary_judgment_v2.py horary_performance_v2.py horary_performance_v1.py ./
 COPY tests/test_horary_engine_v7.py tests/test_horary_engine_v8.py tests/test_horary_patterns_real_v7.py \
-     tests/test_horary_future_window_v2.py tests/test_horary_judgment_v2.py tests/test_horary_performance_v1.py \
+     tests/test_horary_future_window_v2.py tests/test_horary_judgment_v2.py tests/test_horary_performance_v2.py tests/test_horary_performance_v1.py \
      tests/test_saju_core_v1.py tests/test_vedic_core_v1.py tests/test_prashna_core_v1.py \
      tests/test_cross_interpretation_v2.py ./tests/
 
@@ -114,6 +114,7 @@ RUN python -m unittest -v \
     tests.test_horary_patterns_real_v7 \
     tests.test_horary_future_window_v2 \
     tests.test_horary_judgment_v2 \
+    tests.test_horary_performance_v2 \
     tests.test_horary_performance_v1 \
     tests.test_saju_core_v1 \
     tests.test_vedic_core_v1 \
