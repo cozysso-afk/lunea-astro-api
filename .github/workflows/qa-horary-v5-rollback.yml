@@ -1,0 +1,28 @@
+name: QA Horary V5 Rollback
+
+on:
+  push:
+    branches: [fix/horary-rollback-v5-fastpath]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'horary_engine_v5.py'
+      - 'tests/test_horary_v5_fastpath_rollback.py'
+      - '.github/workflows/qa-horary-v5-rollback.yml'
+
+jobs:
+  rollback-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check rollback path
+        run: python -m py_compile horary_engine_v5.py tests/test_horary_v5_fastpath_rollback.py
+      - name: Time production V5 Horary path
+        run: python tests/test_horary_v5_fastpath_rollback.py
