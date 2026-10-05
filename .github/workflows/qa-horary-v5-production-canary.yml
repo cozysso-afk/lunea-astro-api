@@ -1,0 +1,71 @@
+name: QA Horary V5 Production Canary
+
+on:
+  push:
+    branches: [qa/horary-v5-production-canary]
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Measure live FULL Horary job
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request
+          from datetime import datetime
+
+          base = 'https://lunea-astro-api.onrender.com'
+          payload = {
+              'kind': 'horary',
+              'payload': {
+                  'question_text': 'A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?',
+                  'question_iso': '2026-10-05T18:25:23+09:00',
+                  'topic': 'contact',
+                  'timezone': 'Asia/Seoul',
+                  'place': '현재 위치',
+                  'lat': 34.7594,
+                  'lon': 127.6530,
+              },
+          }
+
+          def req(url, data=None):
+              body = None if data is None else json.dumps(data, ensure_ascii=False).encode('utf-8')
+              r = urllib.request.Request(url, data=body, headers={'Content-Type':'application/json'})
+              with urllib.request.urlopen(r, timeout=30) as resp:
+                  return json.loads(resp.read().decode('utf-8'))
+
+          t0 = time.perf_counter()
+          first = req(base + '/v1/jobs/astro', payload)
+          job_id = first['job_id']
+          print('CANARY_JOB_ID=' + job_id, flush=True)
+          deadline = time.monotonic() + 120
+          row = first
+          while row.get('status') not in {'done','error'}:
+              if time.monotonic() > deadline:
+                  raise TimeoutError('production Horary did not finish within 120s')
+              time.sleep(0.25)
+              row = req(base + '/v1/jobs/astro/' + job_id)
+          total = time.perf_counter() - t0
+          print('CANARY_STATUS=' + str(row.get('status')), flush=True)
+          print(f'CANARY_CLIENT_SECONDS={total:.6f}', flush=True)
+          print('CANARY_CREATED_AT=' + str(row.get('created_at')), flush=True)
+          print('CANARY_STARTED_AT=' + str(row.get('started_at')), flush=True)
+          print('CANARY_FINISHED_AT=' + str(row.get('finished_at')), flush=True)
+          if row.get('started_at') and row.get('finished_at'):
+              s = datetime.fromisoformat(row['started_at'].replace('Z','+00:00'))
+              f = datetime.fromisoformat(row['finished_at'].replace('Z','+00:00'))
+              print(f'CANARY_SERVER_SECONDS={(f-s).total_seconds():.6f}', flush=True)
+          if row.get('status') != 'done':
+              raise RuntimeError(row.get('error') or 'Horary job error')
+          result = row.get('result') or {}
+          print('CANARY_SCHEMA=' + str(result.get('schema')), flush=True)
+          print('CANARY_ENGINE=' + str((result.get('meta') or {}).get('horary_engine')), flush=True)
+          support = result.get('judgment_support') or {}
+          print('CANARY_HAS_V6=' + str('traditional_core_v6' in support), flush=True)
+          assert result.get('schema') == 'LUNEA_HORARY_V1'
+          assert (result.get('meta') or {}).get('horary_engine') == 'LUNEA_HORARY_ENGINE_V5_MOIETY_SECT'
+          assert 'traditional_core_v6' not in support
+          assert total < 30.0, total
+          PY
