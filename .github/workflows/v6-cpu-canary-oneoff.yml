@@ -1,9 +1,9 @@
 name: One-off V6 CPU canary benchmark
 
 on:
-  push:
+  pull_request:
     branches:
-      - chore/v6-cpu-canary-benchmark-20261006
+      - chore/v6-benchmark-base
 
 jobs:
   benchmark:
