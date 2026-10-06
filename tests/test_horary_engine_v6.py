@@ -4,9 +4,10 @@ import unittest
 from datetime import datetime, timezone
 
 import astro_core as core
-import horary_topic_routes_v3  # noqa: F401  # installs V4 -> V5 -> V6 -> V7 chain
+import horary_topic_routes_v3  # noqa: F401  # production installs V4 -> V5 only
 import horary_balance_v31 as v31
 import horary_engine_v6 as v6
+import horary_engine_v7 as v7  # noqa: F401  # advanced QA explicitly activates V6 -> V7
 
 
 QUESTION = "A는 2026년 9월 30일까지 나에게 먼저 사적인 연락을 해올까요?"
