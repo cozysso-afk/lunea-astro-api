@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 import re
 import secrets
 import threading
@@ -27,6 +28,7 @@ from pydantic import BaseModel, Field
 from astro_core import calculate_return_context
 import horary_topic_routes_v3  # noqa: F401 - installs the production Horary chain
 from horary_balance_v31 import compute_horary
+from horary_canary_v6 import compute_horary_v6_canary
 from transit_extended import MAX_TRANSIT_DAYS, scan_transits_extended
 
 
@@ -82,7 +84,7 @@ def _job_fingerprint(kind: str, payload: dict[str, Any]) -> str:
 
 
 def _find_active_duplicate_locked(kind: str, fingerprint: str):
-    if kind != "horary" or not fingerprint:
+    if kind not in {"horary", "horary_v6"} or not fingerprint:
         return None
     for row in _jobs.values():
         if (
@@ -142,6 +144,40 @@ def _compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
             lat=lat,
             lon=lon,
         )
+
+    if kind == "horary_v6":
+        question_text = str(payload.get("question_text") or "").strip()
+        question_iso = str(payload.get("question_iso") or "").strip()
+        if len(question_text) < 2:
+            raise ValueError("질문 원문이 비어 있습니다.")
+        if not question_iso:
+            raise ValueError("질문 시각이 비어 있습니다.")
+
+        lat = payload.get("lat")
+        lon = payload.get("lon")
+        if lat is None or lon is None:
+            parsed_lat, parsed_lon = _coordinates_from_place(payload.get("place"))
+            if lat is None:
+                lat = parsed_lat
+            if lon is None:
+                lon = parsed_lon
+
+        run = compute_horary_v6_canary(
+            {
+                "question_text": question_text,
+                "question_iso": question_iso,
+                "topic": str(payload.get("topic") or "general"),
+                "timezone_name": str(payload.get("timezone") or "Asia/Seoul"),
+                "place": payload.get("place"),
+                "lat": lat,
+                "lon": lon,
+            },
+            timeout_seconds=float(os.getenv("HORARY_V6_CANARY_TIMEOUT_SECONDS", "90")),
+        )
+        result = run.get("result")
+        if not isinstance(result, dict):
+            raise RuntimeError("격리된 Horary V6 worker가 유효한 결과를 반환하지 않았습니다.")
+        return result
 
     if kind == "transit":
         natal = payload.get("natal")
@@ -226,11 +262,14 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
 @_router.post("/v1/jobs/astro", status_code=202)
 def create_astro_job(req: AstroJobRequest):
     kind = str(req.kind or "").strip().lower()
-    if kind not in {"horary", "transit", "return"}:
+    allowed_kinds = {"horary", "transit", "return"}
+    if os.getenv("HORARY_V6_JOB_ENABLED", "").strip() == "1":
+        allowed_kinds.add("horary_v6")
+    if kind not in allowed_kinds:
         raise HTTPException(status_code=422, detail="지원하지 않는 Astro job 종류입니다.")
 
     payload = dict(req.payload)
-    fingerprint = _job_fingerprint(kind, payload) if kind == "horary" else ""
+    fingerprint = _job_fingerprint(kind, payload) if kind in {"horary", "horary_v6"} else ""
     with _lock:
         _cleanup_locked()
         duplicate = _find_active_duplicate_locked(kind, fingerprint)
@@ -254,7 +293,7 @@ def create_astro_job(req: AstroJobRequest):
         }
         _jobs[job_id] = row
 
-    executor = _horary_executor if kind == "horary" else _executor
+    executor = _horary_executor if kind in {"horary", "horary_v6"} else _executor
     executor.submit(_run, job_id, kind, payload)
     return _public(row)
 
