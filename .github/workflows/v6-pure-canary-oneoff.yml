@@ -57,3 +57,48 @@ jobs:
           assert (out.get("meta") or {}).get("horary_engine") == v6.VERSION
           assert "traditional_core_v6" in (out.get("judgment_support") or {})
           PY
+
+          python - <<'PY'
+          import sys
+          import time
+          import types
+
+          import astro_core as core
+          import horary_topic_routes_v3  # V4 -> V5
+          import horary_engine_v6 as v6
+          import horary_balance_v31 as v31
+
+          # Benchmark only the V6 optimization portion of performance_v2.
+          # Prevent its historical top-level Future Window import from installing
+          # the Future Window calculation chain during this isolated canary.
+          stub = types.ModuleType("horary_future_window_v2")
+          def _unused_find_orb_entry(*args, **kwargs):
+              raise AssertionError("Future Window must not run in V6-only canary")
+          stub._find_orb_entry = _unused_find_orb_entry
+          sys.modules["horary_future_window_v2"] = stub
+
+          import horary_performance_v2 as perf2
+          import horary_performance_v1 as perf1
+
+          kwargs = dict(
+              question_text="A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?",
+              question_iso="2026-10-05T18:25:23+09:00",
+              topic="contact",
+              timezone_name="Asia/Seoul",
+              place="현재 위치",
+              lat=34.7594,
+              lon=127.6530,
+          )
+
+          core.load_ephemeris()
+          perf2.clear_caches()
+          perf1.clear_caches()
+
+          t0=time.perf_counter()
+          out=v31.compute_horary(**kwargs)
+          elapsed=time.perf_counter()-t0
+          print(f"DECOUPLED_V6_OPT_SECONDS={elapsed:.6f}")
+          print("DECOUPLED_V6_OPT_ENGINE=", (out.get("meta") or {}).get("horary_engine"))
+          assert (out.get("meta") or {}).get("horary_engine") == v6.VERSION
+          assert "traditional_core_v6" in (out.get("judgment_support") or {})
+          PY
