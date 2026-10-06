@@ -15,6 +15,7 @@ import horary_engine_v6 as v6
 
 
 VERSION = "LUNEA_HORARY_PERFORMANCE_V1_MEMO"
+_CANONICAL_EVENT_HORIZON_DAYS = 180.0
 
 _ORIGINAL_PLANET_LON = v6._planet_lon
 _ORIGINAL_SPEED_AT = v6._speed_at
@@ -59,22 +60,41 @@ def _cached_next_sign_ingress(
     longitude: float,
     speed_deg_per_day: float,
     dt_iso: str,
-    horizon_days: float,
 ):
+    """Compute the first ingress once for all callers using horizons <= 180d."""
     result = _ORIGINAL_NEXT_SIGN_INGRESS(
         body,
         {"longitude": longitude, "speed_deg_per_day": speed_deg_per_day},
         v6._parse_utc(dt_iso),
-        horizon_days=float(horizon_days),
+        horizon_days=_CANONICAL_EVENT_HORIZON_DAYS,
     )
     return deepcopy(result)
 
 
+def _within_requested_horizon(result, horizon_days: float):
+    if not result:
+        return None
+    try:
+        days = float(result["days_from_question"])
+    except Exception:
+        return deepcopy(result)
+    return deepcopy(result) if days <= float(horizon_days) + 1e-9 else None
+
+
 def _next_sign_ingress(body: str, row, dt_utc, horizon_days: float = 180.0):
     longitude, speed = _row_key(row)
+    horizon = float(horizon_days)
+    if horizon <= _CANONICAL_EVENT_HORIZON_DAYS:
+        result = _cached_next_sign_ingress(
+            str(body), longitude, speed, _dt_key(dt_utc)
+        )
+        return _within_requested_horizon(result, horizon)
     return deepcopy(
-        _cached_next_sign_ingress(
-            str(body), longitude, speed, _dt_key(dt_utc), float(horizon_days)
+        _ORIGINAL_NEXT_SIGN_INGRESS(
+            str(body),
+            {"longitude": longitude, "speed_deg_per_day": speed},
+            dt_utc,
+            horizon_days=horizon,
         )
     )
 
@@ -85,22 +105,31 @@ def _cached_next_station(
     longitude: float,
     speed_deg_per_day: float,
     dt_iso: str,
-    horizon_days: float,
 ):
+    """Compute the first station once for all callers using horizons <= 180d."""
     result = _ORIGINAL_NEXT_STATION(
         body,
         {"longitude": longitude, "speed_deg_per_day": speed_deg_per_day},
         v6._parse_utc(dt_iso),
-        horizon_days=float(horizon_days),
+        horizon_days=_CANONICAL_EVENT_HORIZON_DAYS,
     )
     return deepcopy(result)
 
 
 def _next_station(body: str, row, dt_utc, horizon_days: float = 180.0):
     longitude, speed = _row_key(row)
+    horizon = float(horizon_days)
+    if horizon <= _CANONICAL_EVENT_HORIZON_DAYS:
+        result = _cached_next_station(
+            str(body), longitude, speed, _dt_key(dt_utc)
+        )
+        return _within_requested_horizon(result, horizon)
     return deepcopy(
-        _cached_next_station(
-            str(body), longitude, speed, _dt_key(dt_utc), float(horizon_days)
+        _ORIGINAL_NEXT_STATION(
+            str(body),
+            {"longitude": longitude, "speed_deg_per_day": speed},
+            dt_utc,
+            horizon_days=horizon,
         )
     )
 
