@@ -121,34 +121,43 @@ def _backward_grid(dt_utc, horizon_days: float, step_hours: float):
 
 
 def _next_sign_ingress_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
-    """V6 next-ingress search with identical timestamps, batched."""
+    """V6 next-ingress search on the same coarse timestamps, batched in chunks."""
     start_sign = int(float(row["longitude"]) // 30.0)
     speed = abs(float(row.get("speed_deg_per_day") or 0.0))
     step_hours = 0.5 if body == "Moon" else 2.0 if speed >= 0.5 else 6.0 if speed >= 0.08 else 12.0
-    grid = _forward_grid(dt_utc, horizon_days, step_hours)
-    if len(grid) < 2:
-        return None
+    chunk_days = 3.0 if body == "Moon" else 10.0 if speed >= 0.5 else 30.0
+    end = dt_utc + timedelta(days=float(horizon_days))
+    cursor = dt_utc
 
-    try:
-        lons = np.ravel(core.get_tropical_ecliptic_lons(body, grid[1:]))
-        if lons.size != len(grid) - 1:
-            raise ValueError("ingress vector size mismatch")
-    except Exception:
-        return _ORIGINAL_NEXT_SIGN_INGRESS(body, row, dt_utc, horizon_days=horizon_days)
+    while cursor < end:
+        chunk_end = min(end, cursor + timedelta(days=chunk_days))
+        chunk_horizon_days = (chunk_end - cursor).total_seconds() / 86400.0
+        grid = _forward_grid(cursor, chunk_horizon_days, step_hours)
+        if len(grid) < 2:
+            break
 
-    for index, lon in enumerate(lons, start=1):
-        if int(float(lon) // 30.0) != start_sign:
-            left, right = grid[index - 1], grid[index]
-            exact = v6._refine_sign_ingress(body, left, right, start_sign)
-            return {
-                "type": "sign_ingress",
-                "body": body,
-                "body_ko": core.PLANET_KO.get(body, body),
-                "utc": exact.isoformat(),
-                "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
-                "from_sign_index": start_sign,
-                "to_sign_index": v6._sign_index_at(body, exact + timedelta(seconds=2)),
-            }
+        try:
+            lons = np.ravel(core.get_tropical_ecliptic_lons(body, grid[1:]))
+            if lons.size != len(grid) - 1:
+                raise ValueError("ingress vector size mismatch")
+        except Exception:
+            return _ORIGINAL_NEXT_SIGN_INGRESS(body, row, dt_utc, horizon_days=horizon_days)
+
+        for index, lon in enumerate(lons, start=1):
+            if int(float(lon) // 30.0) != start_sign:
+                left, right = grid[index - 1], grid[index]
+                exact = v6._refine_sign_ingress(body, left, right, start_sign)
+                return {
+                    "type": "sign_ingress",
+                    "body": body,
+                    "body_ko": core.PLANET_KO.get(body, body),
+                    "utc": exact.isoformat(),
+                    "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
+                    "from_sign_index": start_sign,
+                    "to_sign_index": v6._sign_index_at(body, exact + timedelta(seconds=2)),
+                }
+
+        cursor = chunk_end
     return None
 
 
