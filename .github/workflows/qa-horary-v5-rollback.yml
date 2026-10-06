@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'astro_core.py'
+      - 'horary_balance_v3.py'
+      - 'horary_balance_v31.py'
+      - 'horary_topic_routes_v3.py'
       - 'horary_engine_v5.py'
       - 'cross_interpretation_v5_compat.py'
       - 'cross_interpretation_api_v2.py'
