@@ -155,16 +155,19 @@ def horary_v6_canary(
 
     try:
         started = time.perf_counter()
-        result = compute_horary_v6_canary(payload, timeout_seconds=timeout_seconds)
+        run = compute_horary_v6_canary(payload, timeout_seconds=timeout_seconds)
         elapsed = time.perf_counter() - started
         return {
             "schema": "LUNEA_HORARY_CANARY_V6_V1",
             "canary": {
                 "process_isolated": True,
+                "worker_persistent": True,
+                "worker_started": bool(run.get("worker_started")),
                 "elapsed_seconds": round(elapsed, 6),
+                "worker_compute_seconds": round(float(run.get("worker_compute_seconds") or 0.0), 6),
                 "production_route_unchanged": True,
             },
-            "result": result,
+            "result": run["result"],
         }
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
