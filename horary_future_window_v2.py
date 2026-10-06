@@ -4,6 +4,8 @@ import re
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+import numpy as np
+
 import astro_core as core
 import horary_balance_v31 as v31
 import horary_engine_v6 as v6
@@ -234,36 +236,99 @@ def _find_orb_entry(body_a: str, body_b: str, angle: float, limit: float, start:
 def _all_ingresses(body: str, start: datetime, end: datetime, timezone_name: str):
     if end <= start:
         return []
-    step = timedelta(minutes=30 if body == "Moon" else 60 if body in {"Mercury", "Venus", "Mars", "Sun"} else 180)
+
+    if body == "Moon":
+        step = timedelta(minutes=30)
+        chunk = timedelta(days=3)
+    elif body in {"Mercury", "Venus", "Mars", "Sun"}:
+        step = timedelta(minutes=60)
+        chunk = timedelta(days=10)
+    else:
+        step = timedelta(minutes=180)
+        chunk = timedelta(days=30)
+
     out = []
     left = start
     left_sign = v6._sign_index_at(body, left)
-    while left < end:
-        right = min(end, left + step)
-        right_sign = v6._sign_index_at(body, right)
-        if right_sign != left_sign:
-            exact = v6._refine_sign_ingress(body, left, right, left_sign)
-            to_sign = v6._sign_index_at(body, exact + timedelta(seconds=2))
-            out.append({
-                "type": "sign_ingress",
-                "body": body,
-                "body_ko": core.PLANET_KO.get(body, body),
-                "utc": exact.isoformat(),
-                "time_local": _local(exact, timezone_name),
-                "from_sign_index": left_sign,
-                "to_sign_index": to_sign,
-                "from_sign_en": core.SIGNS_EN[left_sign],
-                "to_sign_en": core.SIGNS_EN[to_sign],
-                "from_sign_ko": _SIGN_KO[left_sign],
-                "to_sign_ko": _SIGN_KO[to_sign],
-            })
-            left = exact + timedelta(seconds=3)
-            left_sign = v6._sign_index_at(body, left)
-            continue
-        left = right
-        left_sign = right_sign
-    return out
 
+    while left < end:
+        chunk_end = min(end, left + chunk)
+        times = []
+        cursor = left
+        while cursor < chunk_end:
+            cursor = min(chunk_end, cursor + step)
+            times.append(cursor)
+
+        if not times:
+            break
+
+        try:
+            lons = np.asarray(core.get_tropical_ecliptic_lons(body, times), dtype=float)
+            signs = np.asarray(np.floor(np.mod(lons, 360.0) / 30.0), dtype=int)
+        except Exception:
+            # Preserve the original scalar behavior if vector evaluation fails.
+            right = min(end, left + step)
+            right_sign = v6._sign_index_at(body, right)
+            if right_sign != left_sign:
+                exact = v6._refine_sign_ingress(body, left, right, left_sign)
+                to_sign = v6._sign_index_at(body, exact + timedelta(seconds=2))
+                out.append({
+                    "type": "sign_ingress",
+                    "body": body,
+                    "body_ko": core.PLANET_KO.get(body, body),
+                    "utc": exact.isoformat(),
+                    "time_local": _local(exact, timezone_name),
+                    "from_sign_index": left_sign,
+                    "to_sign_index": to_sign,
+                    "from_sign_en": core.SIGNS_EN[left_sign],
+                    "to_sign_en": core.SIGNS_EN[to_sign],
+                    "from_sign_ko": _SIGN_KO[left_sign],
+                    "to_sign_ko": _SIGN_KO[to_sign],
+                })
+                left = exact + timedelta(seconds=3)
+                left_sign = v6._sign_index_at(body, left)
+                continue
+            left = right
+            left_sign = right_sign
+            continue
+
+        previous_time = left
+        previous_sign = left_sign
+        crossing_index = None
+        for index, right_sign in enumerate(signs):
+            if int(right_sign) != int(previous_sign):
+                crossing_index = index
+                break
+            previous_time = times[index]
+            previous_sign = int(right_sign)
+
+        if crossing_index is None:
+            left = times[-1]
+            left_sign = int(signs[-1])
+            continue
+
+        right = times[crossing_index]
+        exact = v6._refine_sign_ingress(body, previous_time, right, previous_sign)
+        to_sign = v6._sign_index_at(body, exact + timedelta(seconds=2))
+        out.append({
+            "type": "sign_ingress",
+            "body": body,
+            "body_ko": core.PLANET_KO.get(body, body),
+            "utc": exact.isoformat(),
+            "time_local": _local(exact, timezone_name),
+            "from_sign_index": previous_sign,
+            "to_sign_index": to_sign,
+            "from_sign_en": core.SIGNS_EN[previous_sign],
+            "to_sign_en": core.SIGNS_EN[to_sign],
+            "from_sign_ko": _SIGN_KO[previous_sign],
+            "to_sign_ko": _SIGN_KO[to_sign],
+        })
+        # Match the scalar implementation exactly: restart three seconds after
+        # the refined ingress and establish the new sign from that instant.
+        left = exact + timedelta(seconds=3)
+        left_sign = v6._sign_index_at(body, left)
+
+    return out
 
 def _scope(dt: datetime | None, target) -> str | None:
     if not dt:
