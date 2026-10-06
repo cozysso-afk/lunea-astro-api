@@ -4,6 +4,7 @@ from datetime import datetime
 
 import astro_core as core
 import horary_balance_v31 as v31
+import horary_performance_v5 as perf_v5  # policy-neutral cache/batch acceleration
 
 
 # LUNEA HORARY ENGINE V5
