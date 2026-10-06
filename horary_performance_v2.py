@@ -190,39 +190,52 @@ def _previous_sign_ingress_vector(body: str, row, dt_utc, horizon_days: float = 
     return dt_utc - timedelta(days=float(horizon_days))
 
 def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
-    """V6 station search with the exact same coarse timestamps, batched."""
+    """V6 station search on the same coarse timestamps, batched in chunks."""
     step_hours = 3.0 if body in {"Moon", "Mercury", "Venus", "Mars"} else 8.0
     end = dt_utc + timedelta(days=float(horizon_days))
-    times = [dt_utc]
-    left = dt_utc
-    while left < end:
-        right = min(end, left + timedelta(hours=step_hours))
-        times.append(right)
-        left = right
+    chunk_days = 45.0
+    cursor = dt_utc
 
     try:
-        speeds = _batch_speeds(body, times)
+        prev_speed = float(_batch_speeds(body, [dt_utc])[0])
     except Exception:
         return _ORIGINAL_NEXT_STATION(body, row, dt_utc, horizon_days=horizon_days)
 
-    for index in range(1, len(times)):
-        prev_speed = float(speeds[index - 1])
-        speed = float(speeds[index])
-        if (
-            v6._motion_sign(prev_speed) == 0
-            or v6._motion_sign(speed) == 0
-            or v6._motion_sign(prev_speed) != v6._motion_sign(speed)
-        ):
-            exact = v6._refine_station(body, times[index - 1], times[index])
-            return {
-                "type": "station",
-                "body": body,
-                "body_ko": core.PLANET_KO.get(body, body),
-                "utc": exact.isoformat(),
-                "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
-                "speed_before": round(v6._speed_at(body, exact - timedelta(hours=1)), 6),
-                "speed_after": round(v6._speed_at(body, exact + timedelta(hours=1)), 6),
-            }
+    while cursor < end:
+        chunk_end = min(end, cursor + timedelta(days=chunk_days))
+        chunk_horizon_days = (chunk_end - cursor).total_seconds() / 86400.0
+        grid = _forward_grid(cursor, chunk_horizon_days, step_hours)
+        times = grid[1:]
+        if not times:
+            break
+
+        try:
+            speeds = _batch_speeds(body, times)
+        except Exception:
+            return _ORIGINAL_NEXT_STATION(body, row, dt_utc, horizon_days=horizon_days)
+
+        left = cursor
+        for right, speed_value in zip(times, speeds):
+            speed = float(speed_value)
+            if (
+                v6._motion_sign(prev_speed) == 0
+                or v6._motion_sign(speed) == 0
+                or v6._motion_sign(prev_speed) != v6._motion_sign(speed)
+            ):
+                exact = v6._refine_station(body, left, right)
+                return {
+                    "type": "station",
+                    "body": body,
+                    "body_ko": core.PLANET_KO.get(body, body),
+                    "utc": exact.isoformat(),
+                    "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
+                    "speed_before": round(v6._speed_at(body, exact - timedelta(hours=1)), 6),
+                    "speed_after": round(v6._speed_at(body, exact + timedelta(hours=1)), 6),
+                }
+            prev_speed = speed
+            left = right
+
+        cursor = chunk_end
     return None
 
 
