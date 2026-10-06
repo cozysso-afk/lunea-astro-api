@@ -4,9 +4,9 @@ import unittest
 from datetime import datetime, timezone
 
 import astro_core as core
-import horary_topic_routes_v3  # noqa: F401  # installs V4 -> V5 -> V6 -> V7 chain
+import horary_topic_routes_v3  # noqa: F401  # installs production V4 -> V5 fast path
 import horary_balance_v31 as v31
-import horary_engine_v6 as v6
+import horary_engine_v6 as v6  # explicit import patches v31 to V6 for this unit contract
 
 
 QUESTION = "A는 2026년 9월 30일까지 나에게 먼저 사적인 연락을 해올까요?"
@@ -73,7 +73,7 @@ class HoraryEngineV6Tests(unittest.TestCase):
 
     def test_contact_fixture_strict_traditional_contract(self):
         data = compute("2026-09-05T18:11:00+09:00")
-        self.assertEqual(data["meta"]["horary_engine"], "LUNEA_HORARY_ENGINE_V7_BALANCE_GUARDS")
+        self.assertEqual(data["meta"]["horary_engine"], v6.VERSION)
         self.assertEqual(data["judgment_support"]["traditional_core_v6"]["version"], v6.VERSION)
         self.assertEqual(data["house_system"], "regiomontanus")
         self.assertEqual(data["meta"]["aspect_orb_policy"]["method"], "planetary_moiety_sum")
