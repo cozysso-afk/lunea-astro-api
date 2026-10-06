@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-import horary_topic_routes_v3  # noqa: F401  # activates V4 -> V5 -> V6 -> V7 -> V8 -> FW V2 -> Judgment V2
+import horary_topic_routes_v3  # noqa: F401  # installs production V4 -> V5 fast path
 import horary_balance_v31 as v31
 import horary_judgment_v2 as hv2
 
@@ -32,11 +32,14 @@ class HoraryJudgmentV2Tests(unittest.TestCase):
         self.assertEqual(bj["perfection"], aj["perfection"])
         self.assertEqual(bj["reception"], aj["reception"])
         self.assertEqual(bj["moon_course"], aj["moon_course"])
-        self.assertEqual(bj["essential_dignities_v7"], aj["essential_dignities_v7"])
-        self.assertEqual(
-            bj["judgment_hierarchy_v8"]["qualified_evidence_grade_v8"],
-            aj["judgment_hierarchy_v8"]["qualified_evidence_grade_v8"],
-        )
+        self.assertEqual(bj.get("traditional_core_v6"), aj.get("traditional_core_v6"))
+
+        # V7/V8 are optional layers outside the production V5 rollback chain.
+        # Judgment V2 must preserve them when installed, but their absence is
+        # valid when the caller starts from the rollback chain.
+        for key in ("essential_dignities_v7", "judgment_hierarchy_v8"):
+            if key in bj or key in aj:
+                self.assertEqual(bj.get(key), aj.get(key))
 
     def test_case_a_current_voc_is_sign_bound_not_whole_target_day(self):
         question = "10/1 내 보유주식 수익실현이 가능할까?"
