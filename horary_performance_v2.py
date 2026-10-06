@@ -13,6 +13,7 @@ left untouched. Scalar refinement still uses the existing engine functions.
 
 from collections import OrderedDict
 from datetime import timedelta
+from functools import lru_cache
 import importlib
 import sys
 from threading import RLock
@@ -30,6 +31,7 @@ _ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
 _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
 _ORIGINAL_REFINE_STATION = v6._refine_station
+_ORIGINAL_EXACT_EVENTS_BETWEEN = v6._exact_events_between
 _ORIGINAL_FIND_ORB_ENTRY = None
 
 _LON_CACHE_MAXSIZE = 65536
@@ -207,6 +209,8 @@ def _refine_station_vector(body: str, left, right):
 
 def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
     """V6 station search on the same coarse timestamps, batched in chunks."""
+    if body in {"Sun", "Moon"}:
+        return None
     step_hours = 3.0 if body in {"Moon", "Mercury", "Venus", "Mars"} else 8.0
     end = dt_utc + timedelta(days=float(horizon_days))
     chunk_days = 45.0
@@ -254,6 +258,76 @@ def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
         cursor = chunk_end
     return None
 
+
+
+@lru_cache(maxsize=128)
+def _cached_moon_grid(start_iso: str, end_iso: str, step_hours: float):
+    start_dt = v6._parse_utc(start_iso)
+    end_dt = v6._parse_utc(end_iso)
+    times = list(core._sample_datetimes(start_dt, end_dt, float(step_hours)))
+    values = np.asarray(core.get_tropical_ecliptic_lons("Moon", times), dtype=float)
+    return tuple(float(x) for x in values)
+
+
+def _exact_events_between_moon_cached(body_a: str, body_b: str, start_dt, end_dt):
+    """Preserve V6 exact-event math while reusing the repeated Moon side."""
+    if "Moon" not in {body_a, body_b}:
+        return _ORIGINAL_EXACT_EVENTS_BETWEEN(body_a, body_b, start_dt, end_dt)
+    if end_dt <= start_dt:
+        return []
+
+    step_hours = 0.5
+    times = list(core._sample_datetimes(start_dt, end_dt, step_hours))
+    if len(times) < 3:
+        return []
+
+    moon_lons = np.asarray(
+        _cached_moon_grid(start_dt.isoformat(), end_dt.isoformat(), step_hours),
+        dtype=float,
+    )
+    other = body_b if body_a == "Moon" else body_a
+    other_lons = np.asarray(core.get_tropical_ecliptic_lons(other, times), dtype=float)
+    if body_a == "Moon":
+        a_lons, b_lons = moon_lons, other_lons
+    else:
+        a_lons, b_lons = other_lons, moon_lons
+
+    seps = np.abs((a_lons - b_lons + 180.0) % 360.0 - 180.0)
+    out = []
+    for key, spec in core.HORARY_ASPECTS.items():
+        errors = np.abs(seps - float(spec["angle"]))
+        for i in range(1, len(times) - 1):
+            if not (errors[i] <= errors[i - 1] and errors[i] <= errors[i + 1]):
+                continue
+            if float(errors[i]) > 0.8:
+                continue
+            try:
+                exact, orb = v6._refine_exact_aspect(
+                    body_a,
+                    body_b,
+                    float(spec["angle"]),
+                    times[i - 1],
+                    times[i + 1],
+                )
+            except Exception:
+                continue
+            if orb > v6.ASPECT_EXACT_TOL or not (start_dt <= exact <= end_dt):
+                continue
+            stamp = round(exact.timestamp(), 1)
+            if any(x["_stamp"] == stamp and x["aspect"] == key for x in out):
+                continue
+            target = body_b if body_a == "Moon" else body_a
+            out.append({
+                "_stamp": stamp,
+                "body": target,
+                "body_ko": core.PLANET_KO.get(target, target),
+                "aspect": key,
+                "aspect_ko": spec.get("label_ko", key),
+                "exact_utc": exact.isoformat(),
+                "exact_orb": round(orb, 6),
+            })
+    out.sort(key=lambda x: x["_stamp"])
+    return out
 
 def _loaded_future_window_module():
     """Return Future Window only when another caller already installed it."""
@@ -333,6 +407,7 @@ def _find_orb_entry_vector(body_a: str, body_b: str, angle: float, limit: float,
 
 def clear_caches() -> None:
     global _lon_hits, _lon_misses
+    _cached_moon_grid.cache_clear()
     with _lon_lock:
         _lon_cache.clear()
         _lon_hits = 0
@@ -379,6 +454,7 @@ def install() -> bool:
         v6._previous_sign_ingress = _previous_sign_ingress_vector
         v6._next_station = _next_station_vector
         v6._refine_station = _refine_station_vector
+        v6._exact_events_between = _exact_events_between_moon_cached
         changed = True
 
     # Preserve the old full-chain behavior when Future Window was imported
