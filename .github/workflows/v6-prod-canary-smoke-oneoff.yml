@@ -14,7 +14,7 @@ jobs:
         shell: bash
         env:
           BASE_URL: https://lunea-astro-api-v2.onrender.com
-          CANARY_TOKEN: Mpy28XxmGuMwJ4SoP-g8ui8I-0hl7MXkJudzgaY8wrI
+          CANARY_TOKEN: latest-v6-smoke-20261007-be90af9c
         run: |
           set -euo pipefail
           PAYLOAD='{"question_text":"이 일은 실제로 성사될까요?","question_iso":"2026-09-04T15:00:00+09:00","topic":"general","timezone":"Asia/Seoul","place":"현재 위치","lat":34.7594,"lon":127.6530}'
