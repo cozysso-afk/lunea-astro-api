@@ -1,0 +1,130 @@
+name: One-off Horary V5 perf prototype 2
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Profile current V5 and prototype batching
+        shell: bash
+        run: |
+          python - <<'PY'
+          import copy
+          import time
+          from contextvars import ContextVar
+          from datetime import timedelta
+          import numpy as np
+
+          import astro_api
+          import astro_core as core
+
+          cases = [
+              dict(question_text="p2-general", question_iso="2026-10-06T18:35:00+09:00", topic="general", timezone_name="Asia/Seoul", place="여수"),
+              dict(question_text="p2-contact", question_iso="2026-10-01T23:15:00+09:00", topic="contact", timezone_name="Asia/Seoul", place="여수"),
+              dict(question_text="p2-recon", question_iso="2026-09-02T08:30:00+09:00", topic="reconciliation", timezone_name="Asia/Seoul", place="서울"),
+              dict(question_text="p2-stock", question_iso="2026-10-02T14:20:00+09:00", topic="stock", timezone_name="Asia/Seoul", place="여수"),
+          ]
+
+          # Warm ephemeris and imports.
+          astro_api.compute_horary(**cases[0])
+
+          original_lon = core.get_tropical_ecliptic_lon
+          original_lons = core.get_tropical_ecliptic_lons
+          original_motion = core.planet_motion
+
+          def run(label):
+              outputs=[]
+              t0=time.perf_counter()
+              for case in cases:
+                  outputs.append(astro_api.compute_horary(**case))
+              elapsed=time.perf_counter()-t0
+              print(f"{label}_SECONDS={elapsed:.6f}")
+              return outputs, elapsed
+
+          baseline, base_seconds = run("BASELINE")
+
+          # A) Batch the exact same past/now/future timestamps used by planet_motion.
+          def vector_motion(body, dt_utc):
+              window_hours = 0.25 if body == "Moon" else 1.0 if body in {"Sun","Mercury","Venus","Mars"} else 6.0
+              times = [
+                  dt_utc - timedelta(hours=window_hours),
+                  dt_utc,
+                  dt_utc + timedelta(hours=window_hours),
+              ]
+              values = np.asarray(core.get_tropical_ecliptic_lons(body, times), dtype=float)
+              past, now, future = map(float, values)
+              speed = core.circular_delta(future, past) / ((2 * window_hours) / 24.0)
+              direction = "순행" if speed > 0.002 else "역행" if speed < -0.002 else "정지권"
+              return now, float(speed), direction
+
+          core.planet_motion = vector_motion
+          motion_outputs, motion_seconds = run("VECTOR_MOTION")
+          print("VECTOR_MOTION_EXACT_EQUAL=", baseline == motion_outputs)
+
+          # Restore and install B) request-local exact vector-grid cache.
+          core.planet_motion = original_motion
+          vector_cache_var = ContextVar("horary_v5_vector_cache", default=None)
+          stats={"hit":0,"miss":0}
+
+          def cached_lons(body, datetimes_utc):
+              seq=list(datetimes_utc)
+              cache=vector_cache_var.get()
+              if cache is None:
+                  return original_lons(body,seq)
+              key=(str(body),tuple(x.astimezone(core.UTC).isoformat() for x in seq))
+              cached=cache.get(key)
+              if cached is not None:
+                  stats["hit"]+=1
+                  return cached.copy()
+              stats["miss"]+=1
+              value=np.asarray(original_lons(body,seq),dtype=float)
+              cache[key]=value.copy()
+              return value
+
+          core.get_tropical_ecliptic_lons = cached_lons
+
+          def run_cached(label, use_motion=False):
+              if use_motion:
+                  core.planet_motion = vector_motion
+              else:
+                  core.planet_motion = original_motion
+              outputs=[]
+              t0=time.perf_counter()
+              for case in cases:
+                  token=vector_cache_var.set({})
+                  try:
+                      outputs.append(astro_api.compute_horary(**case))
+                  finally:
+                      vector_cache_var.reset(token)
+              elapsed=time.perf_counter()-t0
+              print(f"{label}_SECONDS={elapsed:.6f}")
+              print(f"{label}_CACHE_STATS={stats}")
+              return outputs,elapsed
+
+          cache_outputs, cache_seconds = run_cached("VECTOR_CACHE", False)
+          print("VECTOR_CACHE_EXACT_EQUAL=", baseline == cache_outputs)
+
+          stats["hit"]=stats["miss"]=0
+          both_outputs, both_seconds = run_cached("BOTH", True)
+          print("BOTH_EXACT_EQUAL=", baseline == both_outputs)
+          print(f"MOTION_SPEEDUP={base_seconds/motion_seconds:.3f}x")
+          print(f"CACHE_SPEEDUP={base_seconds/cache_seconds:.3f}x")
+          print(f"BOTH_SPEEDUP={base_seconds/both_seconds:.3f}x")
+
+          if baseline != motion_outputs:
+              print("VECTOR_MOTION_REJECTED")
+          if baseline != cache_outputs:
+              raise SystemExit("vector cache changed output")
+          if baseline != both_outputs:
+              print("BOTH_REJECTED")
+          PY
