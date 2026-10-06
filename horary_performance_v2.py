@@ -28,6 +28,8 @@ _ORIGINAL_CORE_LON = core.get_tropical_ecliptic_lon
 _ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
 _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
+_ORIGINAL_FIND_EXACT_ASPECT = v6._find_exact_aspect
+_ORIGINAL_EXACT_EVENTS_BETWEEN = v6._exact_events_between
 _ORIGINAL_FIND_ORB_ENTRY = fw2._find_orb_entry
 
 _LON_CACHE_MAXSIZE = 65536
@@ -216,6 +218,118 @@ def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
     return None
 
 
+
+def _shared_pair_lons(body_a: str, body_b: str, times):
+    """Compute two bodies on one identical Skyfield time/observer grid."""
+    seq = list(times)
+    if not seq:
+        return np.asarray([], dtype=float), np.asarray([], dtype=float)
+
+    ts, _, earth, targets, _, _, _ = core.load_ephemeris()
+    sf_times = ts.from_datetimes([dt.astimezone(core.UTC) for dt in seq])
+    observer = earth.at(sf_times)
+
+    def one(body):
+        apparent = observer.observe(targets[body]).apparent()
+        _, lon, _ = apparent.frame_latlon(core.ecliptic_frame)
+        arr = np.ravel(np.asarray(lon.degrees, dtype=float))
+        if arr.size != len(seq):
+            arr = np.ravel(np.squeeze(np.asarray(lon.degrees, dtype=float)))
+        if arr.size != len(seq):
+            raise ValueError(
+                f"{body} shared pair longitude shape mismatch: "
+                f"{arr.size} values for {len(seq)} datetimes"
+            )
+        return np.mod(arr, 360.0)
+
+    return one(body_a), one(body_b)
+
+
+def _find_exact_aspect_shared(body_a: str, body_b: str, angle: float, dt_utc, end_dt):
+    """V6 exact-aspect search with unchanged grid/refinement and one shared observer."""
+    if end_dt <= dt_utc:
+        return None
+    span_days = max(0.01, (end_dt - dt_utc).total_seconds() / 86400.0)
+    step_hours = 0.5 if "Moon" in {body_a, body_b} else 1.5 if span_days < 7 else 3.0
+    times = list(core._sample_datetimes(dt_utc, end_dt, step_hours))
+    if len(times) < 2:
+        return None
+
+    try:
+        a_lons, b_lons = _shared_pair_lons(body_a, body_b, times)
+    except Exception:
+        return _ORIGINAL_FIND_EXACT_ASPECT(body_a, body_b, angle, dt_utc, end_dt)
+
+    seps = np.abs((a_lons - b_lons + 180.0) % 360.0 - 180.0)
+    errors = np.abs(seps - float(angle))
+    idx = int(np.argmin(errors))
+    if idx == 0 or float(errors[idx]) > 1.25:
+        return None
+    left = times[max(0, idx - 1)]
+    right = times[min(len(times) - 1, idx + 1)]
+    if right <= left:
+        return None
+    exact, orb = v6._refine_exact_aspect(body_a, body_b, angle, left, right)
+    if exact < dt_utc or exact > end_dt or orb > v6.ASPECT_EXACT_TOL:
+        return None
+    return {
+        "type": "exact_aspect",
+        "utc": exact.isoformat(),
+        "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
+        "exact_orb": round(orb, 6),
+    }
+
+
+def _exact_events_between_shared(body_a: str, body_b: str, start_dt, end_dt):
+    """V6 exact-event scan with unchanged minima/refinement rules and one shared observer."""
+    if end_dt <= start_dt:
+        return []
+    step_hours = 0.5 if "Moon" in {body_a, body_b} else 2.0
+    times = list(core._sample_datetimes(start_dt, end_dt, step_hours))
+    if len(times) < 3:
+        return []
+
+    try:
+        a_lons, b_lons = _shared_pair_lons(body_a, body_b, times)
+    except Exception:
+        return _ORIGINAL_EXACT_EVENTS_BETWEEN(body_a, body_b, start_dt, end_dt)
+
+    seps = np.abs((a_lons - b_lons + 180.0) % 360.0 - 180.0)
+    out = []
+
+    for key, spec in core.HORARY_ASPECTS.items():
+        errors = np.abs(seps - float(spec["angle"]))
+        for i in range(1, len(times) - 1):
+            if not (errors[i] <= errors[i - 1] and errors[i] <= errors[i + 1]):
+                continue
+            if float(errors[i]) > 0.8:
+                continue
+            try:
+                exact, orb = v6._refine_exact_aspect(
+                    body_a, body_b, float(spec["angle"]), times[i - 1], times[i + 1]
+                )
+            except Exception:
+                continue
+            if orb > v6.ASPECT_EXACT_TOL or not (start_dt <= exact <= end_dt):
+                continue
+            stamp = round(exact.timestamp(), 1)
+            if any(x["_stamp"] == stamp and x["aspect"] == key for x in out):
+                continue
+            out.append({
+                "_stamp": stamp,
+                "body": body_b if body_a == "Moon" else body_a,
+                "body_ko": core.PLANET_KO.get(
+                    body_b if body_a == "Moon" else body_a,
+                    body_b if body_a == "Moon" else body_a,
+                ),
+                "aspect": key,
+                "aspect_ko": spec.get("label_ko", key),
+                "exact_utc": exact.isoformat(),
+                "exact_orb": round(orb, 6),
+            })
+    out.sort(key=lambda x: x["_stamp"])
+    return out
+
 def _aspect_errors_vector(body_a: str, body_b: str, angle: float, times):
     if not times:
         return np.asarray([], dtype=float)
@@ -295,12 +409,16 @@ def install() -> bool:
     _next_sign_ingress_vector._lunea_horary_perf_v2 = True
     _previous_sign_ingress_vector._lunea_horary_perf_v2 = True
     _next_station_vector._lunea_horary_perf_v2 = True
+    _find_exact_aspect_shared._lunea_horary_perf_v2 = True
+    _exact_events_between_shared._lunea_horary_perf_v2 = True
     _find_orb_entry_vector._lunea_horary_perf_v2 = True
 
     core.get_tropical_ecliptic_lon = _cached_core_lon
     v6._next_sign_ingress = _next_sign_ingress_vector
     v6._previous_sign_ingress = _previous_sign_ingress_vector
     v6._next_station = _next_station_vector
+    v6._find_exact_aspect = _find_exact_aspect_shared
+    v6._exact_events_between = _exact_events_between_shared
     fw2._find_orb_entry = _find_orb_entry_vector
     return True
 
