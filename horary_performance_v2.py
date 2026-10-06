@@ -21,12 +21,15 @@ from threading import RLock
 import numpy as np
 
 import astro_core as core
+import horary_balance_v31 as v31
+import horary_engine_v5 as v5
 import horary_engine_v6 as v6
 
 
 VERSION = "LUNEA_HORARY_PERFORMANCE_V2_HOTSPOT_BATCH"
 
 _ORIGINAL_CORE_LON = core.get_tropical_ecliptic_lon
+_ORIGINAL_COMPUTE_HORARY = v31.compute_horary
 _ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
 _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
@@ -72,6 +75,17 @@ def _cached_core_lon(body_name, time_obj):
             _lon_cache.popitem(last=False)
     return value
 
+
+
+def _compute_horary_with_shared_v5_cache(*args, **kwargs):
+    """Keep V5 request-local ephemeris caches alive through opt-in advanced layers."""
+    lon_token = v5._REQUEST_LON_CACHE.set({})
+    prepared_token = v5._PREPARED_GRID_CACHE.set({})
+    try:
+        return _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
+    finally:
+        v5._PREPARED_GRID_CACHE.reset(prepared_token)
+        v5._REQUEST_LON_CACHE.reset(lon_token)
 
 def _motion_window_hours(body: str) -> float:
     if body == "Moon":
@@ -480,6 +494,11 @@ def install() -> bool:
         v6._next_station = _next_station_vector
         v6._refine_station = _refine_station_vector
         v6._exact_events_between = _exact_events_between_moon_cached
+        changed = True
+
+    if not getattr(v31.compute_horary, "_lunea_perf_v2_shared_v5_cache", False):
+        _compute_horary_with_shared_v5_cache._lunea_perf_v2_shared_v5_cache = True
+        v31.compute_horary = _compute_horary_with_shared_v5_cache
         changed = True
 
     # Preserve the old full-chain behavior when Future Window was imported

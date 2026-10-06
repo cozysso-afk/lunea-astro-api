@@ -331,8 +331,15 @@ def _recompute_part_of_fortune(data, sect):
 
 
 def _compute_horary_v5(*args, **kwargs):
-    lon_token = _REQUEST_LON_CACHE.set({})
-    prepared_token = _PREPARED_GRID_CACHE.set({})
+    # Reuse an explicitly provided outer request cache when an advanced,
+    # opt-in layer needs V5 + post-processing to share exact ephemeris points.
+    # The production V5 route still creates/resets its own caches as before.
+    lon_token = None
+    prepared_token = None
+    if _REQUEST_LON_CACHE.get() is None:
+        lon_token = _REQUEST_LON_CACHE.set({})
+    if _PREPARED_GRID_CACHE.get() is None:
+        prepared_token = _PREPARED_GRID_CACHE.set({})
     try:
         data = _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
         if not isinstance(data, dict) or data.get("schema") != "LUNEA_HORARY_V1":
@@ -352,8 +359,10 @@ def _compute_horary_v5(*args, **kwargs):
         }
         return data
     finally:
-        _PREPARED_GRID_CACHE.reset(prepared_token)
-        _REQUEST_LON_CACHE.reset(lon_token)
+        if prepared_token is not None:
+            _PREPARED_GRID_CACHE.reset(prepared_token)
+        if lon_token is not None:
+            _REQUEST_LON_CACHE.reset(lon_token)
 
 
 core._horary_aspect_limit = _moiety_aspect_limit

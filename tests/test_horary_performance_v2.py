@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import horary_topic_routes_v3  # noqa: F401 - install full production chain
 import astro_core as core
+import horary_engine_v5 as v5
 import horary_engine_v6 as v6
 import horary_performance_v1 as perf1
 import horary_performance_v2 as perf2
@@ -24,6 +25,28 @@ class HoraryPerformanceV2Tests(unittest.TestCase):
 
     def test_import_does_not_activate_future_window(self):
         self.assertNotIn("horary_future_window_v2", sys.modules)
+
+    def test_shared_v5_request_cache_is_scoped_to_wrapper(self):
+        original = perf2._ORIGINAL_COMPUTE_HORARY
+        seen = {}
+
+        def fake(*args, **kwargs):
+            seen["lon_cache"] = v5._REQUEST_LON_CACHE.get()
+            seen["prepared_cache"] = v5._PREPARED_GRID_CACHE.get()
+            return {"ok": True}
+
+        perf2._ORIGINAL_COMPUTE_HORARY = fake
+        try:
+            self.assertIsNone(v5._REQUEST_LON_CACHE.get())
+            self.assertIsNone(v5._PREPARED_GRID_CACHE.get())
+            result = perf2._compute_horary_with_shared_v5_cache()
+            self.assertEqual(result, {"ok": True})
+            self.assertIsInstance(seen["lon_cache"], dict)
+            self.assertIsInstance(seen["prepared_cache"], dict)
+            self.assertIsNone(v5._REQUEST_LON_CACHE.get())
+            self.assertIsNone(v5._PREPARED_GRID_CACHE.get())
+        finally:
+            perf2._ORIGINAL_COMPUTE_HORARY = original
 
     def test_identical_scalar_longitude_is_reused_exactly(self):
         calls = {"count": 0}
