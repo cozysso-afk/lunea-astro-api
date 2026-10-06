@@ -17,7 +17,7 @@ COPY astro_core.py astro_api.py transit_extended.py astro_performance_v2.py \
      horary_balance_v2.py horary_balance_v3.py horary_balance_v31.py \
      horary_topic_routes_v3.py horary_engine_v5.py horary_engine_v6.py horary_engine_v7.py horary_engine_v8.py \
      horary_future_window_v2.py horary_future_window_v21.py horary_judgment_v2.py \
-     horary_performance_v2.py horary_performance_v1.py ./
+     horary_performance_v2.py horary_performance_v1.py horary_canary_v6.py horary_canary_runner_v6.py ./
 COPY tests/test_horary_v5_fastpath_rollback.py tests/test_cross_interpretation_v5_compat.py ./tests/
 
 RUN python -c "from astro_core import load_ephemeris; x=load_ephemeris(); print('Ephemeris:', x[5])"
