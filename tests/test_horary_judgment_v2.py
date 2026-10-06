@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import unittest
 
-import horary_topic_routes_v3  # noqa: F401  # activates V4 -> V5 -> V6 -> V7 -> V8 -> FW V2 -> Judgment V2
+import horary_topic_routes_v3  # noqa: F401  # production installs V4 -> V5 only
 import horary_balance_v31 as v31
+import horary_engine_v8  # noqa: F401  # advanced QA explicitly activates V6 -> V7 -> V8
+import horary_future_window_v21  # noqa: F401  # advanced QA activates Future Window V2 -> V2.1
 import horary_judgment_v2 as hv2
 
 
