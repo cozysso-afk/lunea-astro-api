@@ -261,12 +261,27 @@ def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
 
 
 @lru_cache(maxsize=128)
-def _cached_moon_grid(start_iso: str, end_iso: str, step_hours: float):
+def _cached_moon_prepared(start_iso: str, end_iso: str, step_hours: float):
+    """Prepare one Skyfield observer for all Moon-course bodies on this interval."""
     start_dt = v6._parse_utc(start_iso)
     end_dt = v6._parse_utc(end_iso)
     times = list(core._sample_datetimes(start_dt, end_dt, float(step_hours)))
-    values = np.asarray(core.get_tropical_ecliptic_lons("Moon", times), dtype=float)
-    return tuple(float(x) for x in values)
+    if not times:
+        return tuple(), None, None, tuple()
+
+    ts, _, earth, targets, _, _, _ = core.load_ephemeris()
+    sf_times = ts.from_datetimes([dt.astimezone(core.UTC) for dt in times])
+    observer = earth.at(sf_times)
+
+    apparent = observer.observe(targets["Moon"]).apparent()
+    _, lon, _ = apparent.frame_latlon(core.ecliptic_frame)
+    values = np.ravel(np.asarray(lon.degrees, dtype=float))
+    if values.size != len(times):
+        raise ValueError(
+            f"Moon prepared longitude shape mismatch: {values.size} values for {len(times)} datetimes"
+        )
+    moon_lons = tuple(float(x % 360.0) for x in values)
+    return tuple(times), observer, targets, moon_lons
 
 
 def _exact_events_between_moon_cached(body_a: str, body_b: str, start_dt, end_dt):
@@ -277,16 +292,26 @@ def _exact_events_between_moon_cached(body_a: str, body_b: str, start_dt, end_dt
         return []
 
     step_hours = 0.5
-    times = list(core._sample_datetimes(start_dt, end_dt, step_hours))
-    if len(times) < 3:
+    prepared_times, observer, targets, moon_values = _cached_moon_prepared(
+        start_dt.isoformat(),
+        end_dt.isoformat(),
+        step_hours,
+    )
+    times = list(prepared_times)
+    if len(times) < 3 or observer is None or targets is None:
         return []
 
-    moon_lons = np.asarray(
-        _cached_moon_grid(start_dt.isoformat(), end_dt.isoformat(), step_hours),
-        dtype=float,
-    )
+    moon_lons = np.asarray(moon_values, dtype=float)
     other = body_b if body_a == "Moon" else body_a
-    other_lons = np.asarray(core.get_tropical_ecliptic_lons(other, times), dtype=float)
+    apparent = observer.observe(targets[other]).apparent()
+    _, other_lon, _ = apparent.frame_latlon(core.ecliptic_frame)
+    other_lons = np.ravel(np.asarray(other_lon.degrees, dtype=float))
+    if other_lons.size != len(times):
+        raise ValueError(
+            f"{other} prepared longitude shape mismatch: "
+            f"{other_lons.size} values for {len(times)} datetimes"
+        )
+    other_lons = np.mod(other_lons, 360.0)
     if body_a == "Moon":
         a_lons, b_lons = moon_lons, other_lons
     else:
@@ -407,7 +432,7 @@ def _find_orb_entry_vector(body_a: str, body_b: str, angle: float, limit: float,
 
 def clear_caches() -> None:
     global _lon_hits, _lon_misses
-    _cached_moon_grid.cache_clear()
+    _cached_moon_prepared.cache_clear()
     with _lon_lock:
         _lon_cache.clear()
         _lon_hits = 0
