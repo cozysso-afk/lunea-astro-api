@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import numpy as np
 
 import astro_core as core
+import horary_balance_v3 as v3
 import horary_balance_v31 as v31
 
 
@@ -41,8 +42,10 @@ _ORIGINAL_COMPUTE_HORARY = v31.compute_horary
 _ORIGINAL_REFINE_PAIR = core._horary_refine_pair
 _ORIGINAL_VECTOR_LONS = core.get_tropical_ecliptic_lons
 _ORIGINAL_PLANET_MOTION = core.planet_motion
+_ORIGINAL_SAMPLE_UNTIL_FIRST_SIGN_CHANGE = v3._sample_until_first_sign_change
 
 _REQUEST_LON_CACHE = ContextVar("lunea_horary_v5_request_lon_cache", default=None)
+_PREPARED_GRID_CACHE = ContextVar("lunea_horary_v5_prepared_grid_cache", default=None)
 
 
 def _moiety_aspect_limit(body_a, body_b, aspect_key):
@@ -55,11 +58,65 @@ def _moiety_aspect_limit(body_a, body_b, aspect_key):
 
 
 
+def _prepared_many_lons(body_names, datetimes_utc):
+    """Share one prepared Skyfield time/observer grid across multiple bodies."""
+    seq = list(datetimes_utc)
+    bodies = tuple(dict.fromkeys(str(body) for body in body_names))
+    if not seq:
+        return {body: np.asarray([], dtype=float) for body in bodies}
+
+    point_cache = _REQUEST_LON_CACHE.get()
+    prepared_cache = _PREPARED_GRID_CACHE.get()
+    if point_cache is None or prepared_cache is None:
+        return {
+            body: np.asarray(_ORIGINAL_VECTOR_LONS(body, seq), dtype=float)
+            for body in bodies
+        }
+
+    time_keys = [dt.astimezone(core.UTC).isoformat() for dt in seq]
+    missing_bodies = [
+        body
+        for body in bodies
+        if any((body, time_key) not in point_cache for time_key in time_keys)
+    ]
+
+    if missing_bodies:
+        grid_key = tuple(time_keys)
+        prepared = prepared_cache.get(grid_key)
+        if prepared is None:
+            ts, _, earth, targets, _, _, _ = core.load_ephemeris()
+            times = ts.from_datetimes([dt.astimezone(core.UTC) for dt in seq])
+            prepared = (earth.at(times), targets)
+            prepared_cache[grid_key] = prepared
+
+        observer, targets = prepared
+        for body in missing_bodies:
+            apparent = observer.observe(targets[body]).apparent()
+            _, lon, _ = apparent.frame_latlon(core.ecliptic_frame)
+            values = np.ravel(np.asarray(lon.degrees, dtype=float))
+            if values.size != len(seq):
+                raise ValueError(
+                    f"{body} prepared longitude shape mismatch: "
+                    f"{values.size} values for {len(seq)} datetimes"
+                )
+            for time_key, value in zip(time_keys, values):
+                point_cache[(body, time_key)] = float(value % 360.0)
+
+    return {
+        body: np.asarray(
+            [point_cache[(body, time_key)] for time_key in time_keys],
+            dtype=float,
+        )
+        for body in bodies
+    }
+
+
 def _vectorized_refine_pair(body_a, body_b, aspect_angle, left_dt, right_dt, iterations=12):
-    """Preserve the ternary-search math while batching each iteration's ephemeris calls."""
+    """Preserve the ternary-search math while sharing one observer across both bodies."""
     def orbs(times):
-        a = np.asarray(core.get_tropical_ecliptic_lons(body_a, times), dtype=float)
-        b = np.asarray(core.get_tropical_ecliptic_lons(body_b, times), dtype=float)
+        values = _prepared_many_lons((body_a, body_b), times)
+        a = values[body_a]
+        b = values[body_b]
         separations = np.abs((a - b + 180.0) % 360.0 - 180.0)
         return np.abs(separations - float(aspect_angle))
 
@@ -131,6 +188,85 @@ def _request_vector_planet_motion(body, dt_utc):
     direction = "순행" if speed > 0.002 else "역행" if speed < -0.002 else "정지권"
     return now, float(speed), direction
 
+
+def _sample_until_first_sign_change_v5(
+    body_a,
+    row_a,
+    body_b,
+    row_b,
+    dt_utc,
+    horizon_days,
+    step_hours,
+):
+    """Keep V3 sampling semantics while sharing one observer for both bodies."""
+    if _REQUEST_LON_CACHE.get() is None:
+        return _ORIGINAL_SAMPLE_UNTIL_FIRST_SIGN_CHANGE(
+            body_a,
+            row_a,
+            body_b,
+            row_b,
+            dt_utc,
+            horizon_days,
+            step_hours,
+        )
+
+    end_dt = dt_utc + timedelta(days=float(horizon_days))
+    max_speed = max(
+        abs(float(row_a.get("speed_deg_per_day") or 0.0)),
+        abs(float(row_b.get("speed_deg_per_day") or 0.0)),
+    )
+    chunk_days = (
+        3.0
+        if "Moon" in {body_a, body_b}
+        else 10.0
+        if max_speed >= 0.45
+        else 30.0
+    )
+    start_a_sign = int(float(row_a["longitude"]) // 30)
+    start_b_sign = int(float(row_b["longitude"]) // 30)
+    all_times, all_a, all_b = [], [], []
+    cursor = dt_utc
+
+    while cursor < end_dt:
+        chunk_end = min(end_dt, cursor + timedelta(days=chunk_days))
+        chunk_times = list(core._sample_datetimes(cursor, chunk_end, step_hours))
+        if all_times and chunk_times and chunk_times[0] == all_times[-1]:
+            chunk_times = chunk_times[1:]
+        if not chunk_times:
+            break
+
+        values = _prepared_many_lons((body_a, body_b), chunk_times)
+        a_chunk = values[body_a]
+        b_chunk = values[body_b]
+
+        for sample_dt, a_lon, b_lon in zip(chunk_times, a_chunk, b_chunk):
+            if int(float(a_lon) // 30) != start_a_sign:
+                return (
+                    all_times,
+                    np.asarray(all_a, dtype=float),
+                    np.asarray(all_b, dtype=float),
+                    body_a,
+                )
+            if int(float(b_lon) // 30) != start_b_sign:
+                return (
+                    all_times,
+                    np.asarray(all_a, dtype=float),
+                    np.asarray(all_b, dtype=float),
+                    body_b,
+                )
+            all_times.append(sample_dt)
+            all_a.append(float(a_lon))
+            all_b.append(float(b_lon))
+        cursor = chunk_end
+
+    return (
+        all_times,
+        np.asarray(all_a, dtype=float),
+        np.asarray(all_b, dtype=float),
+        None,
+    )
+
+
 def _parse_utc(value):
     raw = str(value or "").strip().replace("Z", "+00:00")
     if not raw:
@@ -195,7 +331,8 @@ def _recompute_part_of_fortune(data, sect):
 
 
 def _compute_horary_v5(*args, **kwargs):
-    token = _REQUEST_LON_CACHE.set({})
+    lon_token = _REQUEST_LON_CACHE.set({})
+    prepared_token = _PREPARED_GRID_CACHE.set({})
     try:
         data = _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
         if not isinstance(data, dict) or data.get("schema") != "LUNEA_HORARY_V1":
@@ -215,13 +352,15 @@ def _compute_horary_v5(*args, **kwargs):
         }
         return data
     finally:
-        _REQUEST_LON_CACHE.reset(token)
+        _PREPARED_GRID_CACHE.reset(prepared_token)
+        _REQUEST_LON_CACHE.reset(lon_token)
 
 
 core._horary_aspect_limit = _moiety_aspect_limit
 core._horary_refine_pair = _vectorized_refine_pair
 core.get_tropical_ecliptic_lons = _request_cached_lons
 core.planet_motion = _request_vector_planet_motion
+v3._sample_until_first_sign_change = _sample_until_first_sign_change_v5
 v31._is_day_chart = _is_day_chart_altitude
 
 if not getattr(v31.compute_horary, "_lunea_engine_v5", False):
