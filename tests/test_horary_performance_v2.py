@@ -38,6 +38,36 @@ class HoraryPerformanceV2Tests(unittest.TestCase):
         self.assertEqual(info["misses"], 1)
         self.assertEqual(info["hits"], 1)
 
+    def test_next_ingress_vector_keeps_original_event_contract(self):
+        moment = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
+        lon, speed, _ = core.planet_motion("Mercury", moment)
+        row = {"longitude": float(lon), "speed_deg_per_day": float(speed)}
+
+        scalar = perf2._ORIGINAL_NEXT_SIGN_INGRESS(
+            "Mercury", row, moment, horizon_days=60.0
+        )
+        perf1.clear_caches()
+        perf2.clear_caches()
+        vector = perf2._next_sign_ingress_vector(
+            "Mercury", row, moment, horizon_days=60.0
+        )
+        self.assertEqual(scalar, vector)
+
+    def test_previous_ingress_vector_keeps_original_event_contract(self):
+        moment = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
+        lon, speed, _ = core.planet_motion("Mercury", moment)
+        row = {"longitude": float(lon), "speed_deg_per_day": float(speed)}
+
+        scalar = perf2._ORIGINAL_PREVIOUS_SIGN_INGRESS(
+            "Mercury", row, moment, horizon_days=5.0
+        )
+        perf1.clear_caches()
+        perf2.clear_caches()
+        vector = perf2._previous_sign_ingress_vector(
+            "Mercury", row, moment, horizon_days=5.0
+        )
+        self.assertEqual(scalar, vector)
+
     def test_station_vector_keeps_original_event_contract(self):
         moment = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
         lon, speed, _ = core.planet_motion("Mercury", moment)
