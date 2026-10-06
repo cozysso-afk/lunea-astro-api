@@ -4,7 +4,7 @@ from __future__ import annotations
 
 The calculation contract is intentionally unchanged. This module only:
 1) reuses identical scalar tropical-longitude evaluations,
-2) evaluates the existing V6 station coarse grid as a vector batch, and
+2) evaluates the existing V6 sign-ingress/station coarse grids as vector batches, and
 3) evaluates the existing Future Window orb-entry coarse grid as a vector batch.
 
 Search horizons, sample spacing, thresholds, and refinement iteration counts are
@@ -25,6 +25,8 @@ import horary_future_window_v2 as fw2
 VERSION = "LUNEA_HORARY_PERFORMANCE_V2_HOTSPOT_BATCH"
 
 _ORIGINAL_CORE_LON = core.get_tropical_ecliptic_lon
+_ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
+_ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
 _ORIGINAL_FIND_ORB_ENTRY = fw2._find_orb_entry
 
@@ -91,6 +93,91 @@ def _batch_speeds(body: str, times):
     delta = (future_lons - past_lons + 180.0) % 360.0 - 180.0
     return np.ravel(delta / ((2.0 * h) / 24.0))
 
+
+
+def _forward_grid(dt_utc, horizon_days: float, step_hours: float):
+    end = dt_utc + timedelta(days=float(horizon_days))
+    out = [dt_utc]
+    left = dt_utc
+    step = timedelta(hours=float(step_hours))
+    while left < end:
+        right = min(end, left + step)
+        out.append(right)
+        left = right
+    return out
+
+
+def _backward_grid(dt_utc, horizon_days: float, step_hours: float):
+    earliest = dt_utc - timedelta(days=float(horizon_days))
+    out = [dt_utc]
+    right = dt_utc
+    step = timedelta(hours=float(step_hours))
+    while right > earliest:
+        left = max(earliest, right - step)
+        out.append(left)
+        right = left
+    return out
+
+
+def _next_sign_ingress_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
+    """V6 next-ingress search with identical timestamps, batched."""
+    start_sign = int(float(row["longitude"]) // 30.0)
+    speed = abs(float(row.get("speed_deg_per_day") or 0.0))
+    step_hours = 0.5 if body == "Moon" else 2.0 if speed >= 0.5 else 6.0 if speed >= 0.08 else 12.0
+    grid = _forward_grid(dt_utc, horizon_days, step_hours)
+    if len(grid) < 2:
+        return None
+
+    try:
+        lons = np.ravel(core.get_tropical_ecliptic_lons(body, grid[1:]))
+        if lons.size != len(grid) - 1:
+            raise ValueError("ingress vector size mismatch")
+    except Exception:
+        return _ORIGINAL_NEXT_SIGN_INGRESS(body, row, dt_utc, horizon_days=horizon_days)
+
+    for index, lon in enumerate(lons, start=1):
+        if int(float(lon) // 30.0) != start_sign:
+            left, right = grid[index - 1], grid[index]
+            exact = v6._refine_sign_ingress(body, left, right, start_sign)
+            return {
+                "type": "sign_ingress",
+                "body": body,
+                "body_ko": core.PLANET_KO.get(body, body),
+                "utc": exact.isoformat(),
+                "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
+                "from_sign_index": start_sign,
+                "to_sign_index": v6._sign_index_at(body, exact + timedelta(seconds=2)),
+            }
+    return None
+
+
+def _previous_sign_ingress_vector(body: str, row, dt_utc, horizon_days: float = 5.0):
+    """V6 previous-ingress search with identical timestamps, batched."""
+    start_sign = int(float(row["longitude"]) // 30.0)
+    speed = abs(float(row.get("speed_deg_per_day") or 0.0))
+    step_hours = 0.5 if body == "Moon" else 3.0 if speed >= 0.5 else 8.0
+    grid = _backward_grid(dt_utc, horizon_days, step_hours)
+    if len(grid) < 2:
+        return dt_utc - timedelta(days=float(horizon_days))
+
+    try:
+        lons = np.ravel(core.get_tropical_ecliptic_lons(body, grid[1:]))
+        if lons.size != len(grid) - 1:
+            raise ValueError("previous ingress vector size mismatch")
+    except Exception:
+        return _ORIGINAL_PREVIOUS_SIGN_INGRESS(body, row, dt_utc, horizon_days=horizon_days)
+
+    for index, lon in enumerate(lons, start=1):
+        if int(float(lon) // 30.0) != start_sign:
+            lo, hi = grid[index], grid[index - 1]
+            for _ in range(28):
+                mid = lo + (hi - lo) / 2
+                if v6._sign_index_at(body, mid) == start_sign:
+                    hi = mid
+                else:
+                    lo = mid
+            return hi
+    return dt_utc - timedelta(days=float(horizon_days))
 
 def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
     """V6 station search with the exact same coarse timestamps, batched."""
@@ -205,10 +292,14 @@ def install() -> bool:
         return False
 
     _cached_core_lon._lunea_horary_perf_v2 = True
+    _next_sign_ingress_vector._lunea_horary_perf_v2 = True
+    _previous_sign_ingress_vector._lunea_horary_perf_v2 = True
     _next_station_vector._lunea_horary_perf_v2 = True
     _find_orb_entry_vector._lunea_horary_perf_v2 = True
 
     core.get_tropical_ecliptic_lon = _cached_core_lon
+    v6._next_sign_ingress = _next_sign_ingress_vector
+    v6._previous_sign_ingress = _previous_sign_ingress_vector
     v6._next_station = _next_station_vector
     fw2._find_orb_entry = _find_orb_entry_vector
     return True
