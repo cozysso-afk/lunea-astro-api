@@ -201,4 +201,108 @@ jobs:
           print("POINT_BOTH_CPROFILE_BEGIN")
           print(out.getvalue())
           print("POINT_BOTH_CPROFILE_END")
+
+          # D) Share one Skyfield Earth/time evaluation across both bodies for
+          # the same sample grid, while preserving the same timestamps/search.
+          import horary_balance_v3 as v3
+          original_sample=v3._sample_until_first_sign_change
+          original_refine=core._horary_refine_pair
+
+          def many_lons(body_names, datetimes_utc):
+              seq=list(datetimes_utc)
+              if not seq:
+                  return {body: np.asarray([],dtype=float) for body in body_names}
+              cache=point_cache_var.get()
+              if cache is None:
+                  cache={}
+              # Use one union time axis. Prefill/cache every requested body at
+              # these timestamps so later overlapping scans can reuse points.
+              keys=[x.astimezone(core.UTC).isoformat() for x in seq]
+              missing_any=False
+              for body in body_names:
+                  if any((str(body),key) not in cache for key in keys):
+                      missing_any=True
+                      break
+              if missing_any:
+                  ts, _, earth, targets, _, _, _ = core.load_ephemeris()
+                  times=ts.from_datetimes([x.astimezone(core.UTC) for x in seq])
+                  observer=earth.at(times)
+                  for body in body_names:
+                      body_keys=[(str(body),key) for key in keys]
+                      if all(key in cache for key in body_keys):
+                          continue
+                      apparent=observer.observe(targets[body]).apparent()
+                      _, lon, _ = apparent.frame_latlon(core.ecliptic_frame)
+                      arr=np.ravel(np.asarray(lon.degrees,dtype=float))
+                      if arr.size != len(seq):
+                          raise ValueError("many longitude shape mismatch")
+                      for key,value in zip(body_keys,arr):
+                          cache[key]=float(value % 360.0)
+              return {
+                  body: np.asarray([cache[(str(body),key)] for key in keys],dtype=float)
+                  for body in body_names
+              }
+
+          def sample_many(body_a,row_a,body_b,row_b,dt_utc,horizon_days,step_hours):
+              end_dt=dt_utc+timedelta(days=float(horizon_days))
+              max_speed=max(abs(float(row_a.get("speed_deg_per_day") or 0.0)),abs(float(row_b.get("speed_deg_per_day") or 0.0)))
+              chunk_days=3.0 if "Moon" in {body_a,body_b} else 10.0 if max_speed>=0.45 else 30.0
+              start_a_sign=int(float(row_a["longitude"])//30)
+              start_b_sign=int(float(row_b["longitude"])//30)
+              all_times=[]; all_a=[]; all_b=[]; cursor=dt_utc
+              while cursor<end_dt:
+                  chunk_end=min(end_dt,cursor+timedelta(days=chunk_days))
+                  chunk_times=list(core._sample_datetimes(cursor,chunk_end,step_hours))
+                  if all_times and chunk_times and chunk_times[0]==all_times[-1]:
+                      chunk_times=chunk_times[1:]
+                  if not chunk_times:
+                      break
+                  values=many_lons((body_a,body_b),chunk_times)
+                  a_chunk=values[body_a]; b_chunk=values[body_b]
+                  for t,a_lon,b_lon in zip(chunk_times,a_chunk,b_chunk):
+                      if int(float(a_lon)//30)!=start_a_sign:
+                          return all_times,np.asarray(all_a,dtype=float),np.asarray(all_b,dtype=float),body_a
+                      if int(float(b_lon)//30)!=start_b_sign:
+                          return all_times,np.asarray(all_a,dtype=float),np.asarray(all_b,dtype=float),body_b
+                      all_times.append(t); all_a.append(float(a_lon)); all_b.append(float(b_lon))
+                  cursor=chunk_end
+              return all_times,np.asarray(all_a,dtype=float),np.asarray(all_b,dtype=float),None
+
+          def refine_many(body_a,body_b,aspect_angle,left_dt,right_dt,iterations=12):
+              def orbs(times):
+                  vals=many_lons((body_a,body_b),times)
+                  a=vals[body_a]; b=vals[body_b]
+                  seps=np.abs((a-b+180.0)%360.0-180.0)
+                  return np.abs(seps-float(aspect_angle))
+              left,right=left_dt,right_dt
+              for _ in range(iterations):
+                  span=right-left
+                  m1=left+span/3
+                  m2=right-span/3
+                  values=orbs([m1,m2])
+                  if float(values[0])<=float(values[1]):
+                      right=m2
+                  else:
+                      left=m1
+              exact=left+(right-left)/2
+              return exact,float(orbs([exact])[0])
+
+          v3._sample_until_first_sign_change=sample_many
+          core._horary_refine_pair=refine_many
+          core.planet_motion=vector_motion
+          pstats["hit"]=pstats["miss"]=pstats["batches"]=0
+          many_outputs=[]
+          t_many=time.perf_counter()
+          for case in cases:
+              token=point_cache_var.set({})
+              try:
+                  many_outputs.append(astro_api.compute_horary(**case))
+              finally:
+                  point_cache_var.reset(token)
+          many_seconds=time.perf_counter()-t_many
+          print(f"MANY_BOTH_SECONDS={many_seconds:.6f}")
+          print("MANY_BOTH_EXACT_EQUAL=",baseline==many_outputs)
+          print(f"MANY_BOTH_SPEEDUP={base_seconds/many_seconds:.3f}x")
+          if baseline!=many_outputs:
+              print("MANY_BOTH_REJECTED")
           PY
