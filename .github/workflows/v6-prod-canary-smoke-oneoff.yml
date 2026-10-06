@@ -1,0 +1,70 @@
+name: One-off production V6 canary smoke
+
+on:
+  pull_request:
+    branches:
+      - chore/v6-prod-smoke-base-20261007
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify private V6 canary and V5 isolation
+        shell: bash
+        env:
+          CANARY_TOKEN: ${{ github.event.pull_request.base.sha }}
+        run: |
+          cat >/tmp/horary.json <<'JSON'
+          {
+            "question_text": "이 일은 실제로 성사될까요?",
+            "question_iso": "2026-09-04T15:00:00+09:00",
+            "topic": "general",
+            "timezone": "Asia/Seoul",
+            "place": "현재 위치",
+            "lat": 34.7594,
+            "lon": 127.6530
+          }
+          JSON
+
+          UNAUTH=$(curl -sS --max-time 30 -o /tmp/unauth.json -w '%{http_code} %{time_total}' \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/horary.json \
+            https://lunea-astro-api-v2.onrender.com/v1/horary/canary-v6)
+          echo "CANARY_UNAUTH=$UNAUTH"
+          test "${UNAUTH%% *}" = "404"
+
+          AUTH=$(curl -sS --max-time 100 -o /tmp/canary.json -w '%{http_code} %{time_total}' \
+            -H 'Content-Type: application/json' \
+            -H "X-LUNEA-Canary: $CANARY_TOKEN" \
+            --data-binary @/tmp/horary.json \
+            https://lunea-astro-api-v2.onrender.com/v1/horary/canary-v6)
+          echo "CANARY_AUTH=$AUTH"
+
+          V5=$(curl -sS --max-time 60 -o /tmp/v5.json -w '%{http_code} %{time_total}' \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/horary.json \
+            https://lunea-astro-api-v2.onrender.com/v1/horary)
+          echo "PRODUCTION_V5=$V5"
+
+          python - <<'PY'
+          import json
+
+          with open("/tmp/canary.json", encoding="utf-8") as f:
+              canary=json.load(f)
+          with open("/tmp/v5.json", encoding="utf-8") as f:
+              v5=json.load(f)
+
+          result=canary.get("result") or {}
+          print("CANARY_SCHEMA="+str(canary.get("schema")))
+          print("CANARY_PROCESS_ISOLATED="+str((canary.get("canary") or {}).get("process_isolated")))
+          print("CANARY_ELAPSED_SECONDS="+str((canary.get("canary") or {}).get("elapsed_seconds")))
+          print("CANARY_ENGINE="+str((result.get("meta") or {}).get("horary_engine")))
+          print("PRODUCTION_ENGINE="+str((v5.get("meta") or {}).get("horary_engine")))
+
+          assert canary.get("schema") == "LUNEA_HORARY_CANARY_V6_V1"
+          assert (canary.get("canary") or {}).get("process_isolated") is True
+          assert (result.get("meta") or {}).get("horary_engine") == "LUNEA_HORARY_ENGINE_V6_STRICT_TRADITIONAL_CORE"
+          assert (v5.get("meta") or {}).get("horary_engine") == "LUNEA_HORARY_ENGINE_V5_MOIETY_SECT"
+          PY
