@@ -29,6 +29,7 @@ _ORIGINAL_CORE_LON = core.get_tropical_ecliptic_lon
 _ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
 _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
+_ORIGINAL_REFINE_STATION = v6._refine_station
 _ORIGINAL_FIND_ORB_ENTRY = None
 
 _LON_CACHE_MAXSIZE = 65536
@@ -188,6 +189,21 @@ def _previous_sign_ingress_vector(body: str, row, dt_utc, horizon_days: float = 
                     lo = mid
             return hi
     return dt_utc - timedelta(days=float(horizon_days))
+
+def _refine_station_vector(body: str, left, right):
+    """Preserve V6's 24-step ternary search while batching each pair of probes."""
+    lo, hi = left, right
+    for _ in range(24):
+        span = hi - lo
+        m1 = lo + span / 3
+        m2 = hi - span / 3
+        speeds = _batch_speeds(body, [m1, m2])
+        if abs(float(speeds[0])) <= abs(float(speeds[1])):
+            hi = m2
+        else:
+            lo = m1
+    return lo + (hi - lo) / 2
+
 
 def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
     """V6 station search on the same coarse timestamps, batched in chunks."""
@@ -356,11 +372,13 @@ def install() -> bool:
         _next_sign_ingress_vector._lunea_horary_perf_v2 = True
         _previous_sign_ingress_vector._lunea_horary_perf_v2 = True
         _next_station_vector._lunea_horary_perf_v2 = True
+        _refine_station_vector._lunea_horary_perf_v2 = True
 
         core.get_tropical_ecliptic_lon = _cached_core_lon
         v6._next_sign_ingress = _next_sign_ingress_vector
         v6._previous_sign_ingress = _previous_sign_ingress_vector
         v6._next_station = _next_station_vector
+        v6._refine_station = _refine_station_vector
         changed = True
 
     # Preserve the old full-chain behavior when Future Window was imported
