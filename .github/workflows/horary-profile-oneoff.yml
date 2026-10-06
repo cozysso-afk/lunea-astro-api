@@ -87,3 +87,38 @@ jobs:
           print(out.getvalue())
           print("CPROFILE_END")
           PY
+
+      - name: Inspect V3.1 perfection pair duplication
+        shell: bash
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          import astro_api
+          import horary_balance_v3 as v3
+
+          original=v3._balanced_perfection_candidate
+          calls=[]
+          def counted(body_a,row_a,body_b,row_b,dt_utc,timezone_name):
+              key=(
+                  str(body_a), round(float(row_a["longitude"]),8), round(float(row_a.get("speed_deg_per_day") or 0.0),8),
+                  str(body_b), round(float(row_b["longitude"]),8), round(float(row_b.get("speed_deg_per_day") or 0.0),8),
+                  dt_utc.isoformat(), str(timezone_name)
+              )
+              calls.append(key)
+              return original(body_a,row_a,body_b,row_b,dt_utc,timezone_name)
+          v3._balanced_perfection_candidate=counted
+
+          astro_api.compute_horary(
+              question_text="Horary pair duplication profile",
+              question_iso="2026-10-06T18:35:00+09:00",
+              topic="general",
+              timezone_name="Asia/Seoul",
+              place="여수",
+          )
+          counts=Counter(calls)
+          print("PAIR_CALLS_TOTAL=",len(calls))
+          print("PAIR_KEYS_UNIQUE=",len(counts))
+          print("PAIR_DUPLICATE_HITS=",sum(v-1 for v in counts.values()))
+          for key,n in counts.most_common():
+              print("PAIR",key[0],key[3],"count=",n)
+          PY
