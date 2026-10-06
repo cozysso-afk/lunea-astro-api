@@ -185,4 +185,20 @@ jobs:
               print("POINT_CACHE_REJECTED")
           if baseline != point_both_outputs:
               print("POINT_BOTH_REJECTED")
+
+          # Profile one representative case with the best exact-output prototype active.
+          import cProfile, io, pstats as py_pstats
+          profiler=cProfile.Profile()
+          token=point_cache_var.set({})
+          try:
+              profiler.enable()
+              astro_api.compute_horary(**cases[0])
+              profiler.disable()
+          finally:
+              point_cache_var.reset(token)
+          out=io.StringIO()
+          py_pstats.Stats(profiler,stream=out).sort_stats("cumulative").print_stats(80)
+          print("POINT_BOTH_CPROFILE_BEGIN")
+          print(out.getvalue())
+          print("POINT_BOTH_CPROFILE_END")
           PY
