@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import os
+import secrets
+import time
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -16,6 +19,7 @@ from astro_core import (
 )
 import horary_topic_routes_v3  # noqa: F401  # patches extra Horary house routes
 from horary_balance_v31 import compute_horary
+from horary_canary_v6 import compute_horary_v6_canary
 from transit_extended import scan_transits_extended, MAX_TRANSIT_DAYS
 
 THAI_TAKSA_RANGE_MAX_DAYS = 90
@@ -124,6 +128,52 @@ def horary(req: HoraryRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Horary 계산 실패: {type(exc).__name__}: {exc}"
+        )
+
+
+@app.post("/v1/horary/canary-v6")
+def horary_v6_canary(
+    req: HoraryRequest,
+    x_lunea_canary: Optional[str] = Header(default=None, alias="X-LUNEA-Canary"),
+):
+    token = os.getenv("HORARY_V6_CANARY_TOKEN", "").strip()
+    if not token or not x_lunea_canary or not secrets.compare_digest(x_lunea_canary, token):
+        # Keep the private canary undiscoverable on services where it is disabled
+        # or when a caller does not know the canary token.
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    timeout_seconds = float(os.getenv("HORARY_V6_CANARY_TIMEOUT_SECONDS", "90"))
+    payload = {
+        "question_text": req.question_text,
+        "question_iso": req.question_iso,
+        "topic": req.topic,
+        "timezone_name": req.timezone,
+        "place": req.place,
+        "lat": req.lat,
+        "lon": req.lon,
+    }
+
+    try:
+        started = time.perf_counter()
+        result = compute_horary_v6_canary(payload, timeout_seconds=timeout_seconds)
+        elapsed = time.perf_counter() - started
+        return {
+            "schema": "LUNEA_HORARY_CANARY_V6_V1",
+            "canary": {
+                "process_isolated": True,
+                "elapsed_seconds": round(elapsed, 6),
+                "production_route_unchanged": True,
+            },
+            "result": result,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail=f"V6 canary timeout: {exc}")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Horary V6 canary 실패: {type(exc).__name__}: {exc}"
         )
 
 class TransitScanRequest(BaseModel):
