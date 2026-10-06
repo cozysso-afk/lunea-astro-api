@@ -35,25 +35,39 @@ jobs:
           python - <<'PY'
           import json
           before=json.load(open('/tmp/v5-before.json'))
-          canary=json.load(open('/tmp/canary.json'))
+          canary1=json.load(open('/tmp/canary1.json'))
+          canary2=json.load(open('/tmp/canary2.json'))
           after=json.load(open('/tmp/v5-after.json'))
 
           before_engine=(before.get('meta') or {}).get('horary_engine')
-          result=canary.get('result') or {}
-          canary_engine=(result.get('meta') or {}).get('horary_engine')
+          result1=canary1.get('result') or {}
+          result2=canary2.get('result') or {}
+          engine1=(result1.get('meta') or {}).get('horary_engine')
+          engine2=(result2.get('meta') or {}).get('horary_engine')
+          meta1=canary1.get('canary') or {}
+          meta2=canary2.get('canary') or {}
           after_engine=(after.get('meta') or {}).get('horary_engine')
 
           print('V5_BEFORE_ENGINE='+str(before_engine))
-          print('V6_CANARY_ENGINE='+str(canary_engine))
-          print('V6_CANARY_SCHEMA='+str(canary.get('schema')))
-          print('V6_CANARY_CHILD_SECONDS='+str((canary.get('canary') or {}).get('elapsed_seconds')))
-          print('V6_CANARY_PROCESS_ISOLATED='+str((canary.get('canary') or {}).get('process_isolated')))
+          print('V6_CANARY_FIRST_ENGINE='+str(engine1))
+          print('V6_CANARY_FIRST_PARENT_SECONDS='+str(meta1.get('elapsed_seconds')))
+          print('V6_CANARY_FIRST_COMPUTE_SECONDS='+str(meta1.get('worker_compute_seconds')))
+          print('V6_CANARY_FIRST_WORKER_STARTED='+str(meta1.get('worker_started')))
+          print('V6_CANARY_SECOND_ENGINE='+str(engine2))
+          print('V6_CANARY_SECOND_PARENT_SECONDS='+str(meta2.get('elapsed_seconds')))
+          print('V6_CANARY_SECOND_COMPUTE_SECONDS='+str(meta2.get('worker_compute_seconds')))
+          print('V6_CANARY_SECOND_WORKER_STARTED='+str(meta2.get('worker_started')))
+          print('V6_CANARY_PROCESS_ISOLATED='+str(meta2.get('process_isolated')))
           print('V5_AFTER_ENGINE='+str(after_engine))
 
           assert before_engine == 'LUNEA_HORARY_ENGINE_V5_MOIETY_SECT'
-          assert canary.get('schema') == 'LUNEA_HORARY_CANARY_V6_V1'
-          assert canary_engine == 'LUNEA_HORARY_ENGINE_V6_STRICT_TRADITIONAL_CORE'
-          assert (canary.get('canary') or {}).get('process_isolated') is True
+          assert canary1.get('schema') == 'LUNEA_HORARY_CANARY_V6_V1'
+          assert canary2.get('schema') == 'LUNEA_HORARY_CANARY_V6_V1'
+          assert engine1 == 'LUNEA_HORARY_ENGINE_V6_STRICT_TRADITIONAL_CORE'
+          assert engine2 == 'LUNEA_HORARY_ENGINE_V6_STRICT_TRADITIONAL_CORE'
+          assert meta1.get('worker_persistent') is True
+          assert meta2.get('worker_persistent') is True
+          assert meta2.get('process_isolated') is True
           assert after_engine == 'LUNEA_HORARY_ENGINE_V5_MOIETY_SECT'
-          print('PRODUCTION_V6_CANARY_ISOLATION_CONFIRMED=true')
+          print('PRODUCTION_V6_PERSISTENT_CANARY_CONFIRMED=true')
           PY
