@@ -1,0 +1,89 @@
+name: One-off Horary CPU profile
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Warm and profile production V5 chain
+        shell: bash
+        run: |
+          python - <<'PY'
+          import cProfile, io, pstats, time
+          import astro_api
+          import astro_core as core
+
+          kwargs = dict(
+              question_text="Horary production CPU profile",
+              question_iso="2026-10-06T18:35:00+09:00",
+              topic="general",
+              timezone_name="Asia/Seoul",
+              place="여수",
+          )
+
+          t0=time.perf_counter()
+          warm=astro_api.compute_horary(**kwargs)
+          warm_elapsed=time.perf_counter()-t0
+          print(f"WARMUP_SECONDS={warm_elapsed:.6f}")
+          print("WARM_ENGINE=", (warm.get("meta") or {}).get("horary_engine"))
+
+          calls={}
+          def wrap(module, name, label=None):
+              original=getattr(module,name)
+              key=label or f"{module.__name__}.{name}"
+              calls[key]={"count":0,"seconds":0.0}
+              def timed(*args,**kwargs):
+                  s=time.perf_counter()
+                  try:
+                      return original(*args,**kwargs)
+                  finally:
+                      calls[key]["count"]+=1
+                      calls[key]["seconds"]+=time.perf_counter()-s
+              setattr(module,name,timed)
+              return original
+
+          wrap(core,"get_tropical_ecliptic_lon")
+          wrap(core,"get_tropical_ecliptic_lons")
+          wrap(core,"planet_motion")
+          wrap(core,"_horary_perfection_candidate")
+          wrap(core,"_horary_moon_course")
+
+          import horary_balance_v3 as v3
+          import horary_balance_v31 as v31
+          wrap(v3,"_balanced_perfection_candidate")
+          wrap(v31,"_translation_candidates")
+          wrap(v31,"_collection_candidates")
+          wrap(v31,"_confirmed_interventions")
+          wrap(v31,"_refranation_pattern")
+
+          profiler=cProfile.Profile()
+          t1=time.perf_counter()
+          profiler.enable()
+          data=astro_api.compute_horary(**kwargs)
+          profiler.disable()
+          elapsed=time.perf_counter()-t1
+
+          print(f"PROFILED_SECONDS={elapsed:.6f}")
+          print("ENGINE=", (data.get("meta") or {}).get("horary_engine"))
+          print("SCHEMA=", data.get("schema"))
+          print("TIMED_CALLS_BEGIN")
+          for key,row in sorted(calls.items(), key=lambda kv: kv[1]["seconds"], reverse=True):
+              print(f"{key} count={row['count']} seconds={row['seconds']:.6f}")
+          print("TIMED_CALLS_END")
+
+          out=io.StringIO()
+          pstats.Stats(profiler,stream=out).sort_stats("cumulative").print_stats(70)
+          print("CPROFILE_BEGIN")
+          print(out.getvalue())
+          print("CPROFILE_END")
+          PY
