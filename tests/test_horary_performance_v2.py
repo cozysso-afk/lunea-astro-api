@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -20,6 +21,9 @@ class HoraryPerformanceV2Tests(unittest.TestCase):
     def setUp(self):
         perf2.clear_caches()
         perf1.clear_caches()
+
+    def test_import_does_not_activate_future_window(self):
+        self.assertNotIn("horary_future_window_v2", sys.modules)
 
     def test_identical_scalar_longitude_is_reused_exactly(self):
         calls = {"count": 0}
@@ -83,6 +87,12 @@ class HoraryPerformanceV2Tests(unittest.TestCase):
         self.assertEqual(scalar, vector)
 
     def test_orb_entry_vector_matches_scalar_search_and_refinement(self):
+        import horary_future_window_v2 as fw2
+
+        perf2.install_future_window()
+        self.assertIsNotNone(perf2._ORIGINAL_FIND_ORB_ENTRY)
+        self.assertIs(fw2._find_orb_entry, perf2._find_orb_entry_vector)
+
         start = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
         end = start + timedelta(days=30)
         args = ("Moon", "Venus", 0.0, 8.0, start, end)
