@@ -1,0 +1,84 @@
+name: One-off V6 chunked station equivalence
+
+on:
+  pull_request:
+    branches:
+      - chore/v6-chunked-ingress-benchmark-base
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: chore/v6-decoupled-benchmark-base
+          path: base
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          path: head
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: head/requirements.txt
+      - run: pip install -r head/requirements.txt
+      - name: Compare V6 outputs and timing
+        shell: bash
+        run: |
+          cat >/tmp/run_v6_cases.py <<'PY'
+          import json
+          import sys
+          import time
+
+          sys.path.insert(0, sys.argv[1])
+
+          import astro_core as core
+          import horary_topic_routes_v3
+          import horary_engine_v6 as v6
+          import horary_balance_v31 as v31
+          import horary_performance_v2 as perf2
+          import horary_performance_v1 as perf1
+
+          assert "horary_future_window_v2" not in sys.modules
+
+          cases = [
+              ("contact", "2026-10-05T18:25:23+09:00", "A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?"),
+              ("general", "2026-09-04T15:00:00+09:00", "이 일은 실제로 성사될까요?"),
+              ("stock", "2026-09-30T15:53:00+09:00", "10/1 내 보유주식 수익실현이 가능할까?"),
+              ("relationship", "2026-09-05T18:11:00+09:00", "이 관계는 이어질까요?"),
+          ]
+
+          core.load_ephemeris()
+          perf2.clear_caches()
+          perf1.clear_caches()
+          rows=[]
+          t0=time.perf_counter()
+          for topic,moment,question in cases:
+              rows.append(v31.compute_horary(
+                  question_text=question,
+                  question_iso=moment,
+                  topic=topic,
+                  timezone_name="Asia/Seoul",
+                  place="현재 위치",
+                  lat=34.7594,
+                  lon=127.6530,
+              ))
+          elapsed=time.perf_counter()-t0
+          assert all((row.get("meta") or {}).get("horary_engine") == v6.VERSION for row in rows)
+          assert "horary_future_window_v2" not in sys.modules
+          print(f"SECONDS={elapsed:.6f}")
+          print(json.dumps(rows,ensure_ascii=False,sort_keys=True,separators=(",",":")))
+          PY
+
+          (cd base && python /tmp/run_v6_cases.py "$PWD" > /tmp/base.out)
+          (cd head && python /tmp/run_v6_cases.py "$PWD" > /tmp/head.out)
+
+          echo "BASE_$(head -n 1 /tmp/base.out)"
+          echo "HEAD_$(head -n 1 /tmp/head.out)"
+          tail -n 1 /tmp/base.out >/tmp/base.json
+          tail -n 1 /tmp/head.out >/tmp/head.json
+          cmp /tmp/base.json /tmp/head.json
+          echo "V6_CHUNKED_STATION_OUTPUT_EXACT_EQUAL=true"
