@@ -16,7 +16,7 @@ jobs:
       - name: Benchmark V5 vs V6 at Render free CPU limit
         shell: bash
         run: |
-          docker run --rm --cpus=0.15 --entrypoint python lunea-v6-canary - <<'PY'
+          docker run --rm -i --cpus=0.15 --entrypoint python lunea-v6-canary - <<'PY'
           import time
 
           import astro_core as core
