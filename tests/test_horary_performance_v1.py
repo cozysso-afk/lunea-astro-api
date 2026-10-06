@@ -35,6 +35,7 @@ class HoraryPerformanceV1Tests(unittest.TestCase):
                 "body": body,
                 "utc": dt_utc.isoformat(),
                 "horizon_days": float(horizon_days),
+                "days_from_question": 12.0,
                 "speed": float(row.get("speed_deg_per_day") or 0.0),
             }
 
@@ -54,6 +55,68 @@ class HoraryPerformanceV1Tests(unittest.TestCase):
         finally:
             perf._ORIGINAL_NEXT_STATION = original
             perf._cached_next_station.cache_clear()
+
+    def test_shorter_station_horizons_reuse_canonical_first_event(self):
+        original = perf._ORIGINAL_NEXT_STATION
+        calls = {"count": 0}
+
+        def fake(body, row, dt_utc, horizon_days=180.0):
+            calls["count"] += 1
+            return {
+                "type": "station",
+                "body": body,
+                "utc": dt_utc.isoformat(),
+                "days_from_question": 20.0,
+            }
+
+        perf._ORIGINAL_NEXT_STATION = fake
+        perf._cached_next_station.cache_clear()
+        try:
+            moment = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
+            row = {"longitude": 123.456789, "speed_deg_per_day": 0.42}
+
+            within = v6._next_station("Mercury", row, moment, horizon_days=30.0)
+            too_short = v6._next_station("Mercury", row, moment, horizon_days=10.0)
+            within_again = v6._next_station("Mercury", row, moment, horizon_days=60.0)
+
+            self.assertEqual(calls["count"], 1)
+            self.assertIsNotNone(within)
+            self.assertIsNone(too_short)
+            self.assertIsNotNone(within_again)
+        finally:
+            perf._ORIGINAL_NEXT_STATION = original
+            perf._cached_next_station.cache_clear()
+
+    def test_shorter_ingress_horizons_reuse_canonical_first_event(self):
+        original = perf._ORIGINAL_NEXT_SIGN_INGRESS
+        calls = {"count": 0}
+
+        def fake(body, row, dt_utc, horizon_days=180.0):
+            calls["count"] += 1
+            return {
+                "type": "sign_ingress",
+                "body": body,
+                "utc": dt_utc.isoformat(),
+                "days_from_question": 7.0,
+            }
+
+        perf._ORIGINAL_NEXT_SIGN_INGRESS = fake
+        perf._cached_next_sign_ingress.cache_clear()
+        try:
+            moment = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
+            row = {"longitude": 123.456789, "speed_deg_per_day": 0.42}
+
+            within = v6._next_sign_ingress("Mercury", row, moment, horizon_days=10.0)
+            too_short = v6._next_sign_ingress("Mercury", row, moment, horizon_days=3.0)
+            within_again = v6._next_sign_ingress("Mercury", row, moment, horizon_days=30.0)
+
+            self.assertEqual(calls["count"], 1)
+            self.assertIsNotNone(within)
+            self.assertIsNone(too_short)
+            self.assertIsNotNone(within_again)
+        finally:
+            perf._ORIGINAL_NEXT_SIGN_INGRESS = original
+            perf._cached_next_sign_ingress.cache_clear()
 
     def test_identical_speed_probe_is_cached(self):
         original = perf._ORIGINAL_SPEED_AT
