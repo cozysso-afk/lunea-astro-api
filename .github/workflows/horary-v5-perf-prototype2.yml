@@ -305,4 +305,18 @@ jobs:
           print(f"MANY_BOTH_SPEEDUP={base_seconds/many_seconds:.3f}x")
           if baseline!=many_outputs:
               print("MANY_BOTH_REJECTED")
+
+          profiler2=cProfile.Profile()
+          token=point_cache_var.set({})
+          try:
+              profiler2.enable()
+              astro_api.compute_horary(**cases[0])
+              profiler2.disable()
+          finally:
+              point_cache_var.reset(token)
+          out2=io.StringIO()
+          py_pstats.Stats(profiler2,stream=out2).sort_stats("cumulative").print_stats(70)
+          print("MANY_BOTH_CPROFILE_BEGIN")
+          print(out2.getvalue())
+          print("MANY_BOTH_CPROFILE_END")
           PY
