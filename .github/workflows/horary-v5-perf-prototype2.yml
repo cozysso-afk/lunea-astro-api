@@ -127,4 +127,62 @@ jobs:
               raise SystemExit("vector cache changed output")
           if baseline != both_outputs:
               print("BOTH_REJECTED")
+
+          # C) Request-local per-time-point cache: reuse overlapping vector grids,
+          # while batching only the missing timestamps in one Skyfield call.
+          core.get_tropical_ecliptic_lons = original_lons
+          core.planet_motion = original_motion
+          point_cache_var = ContextVar("horary_v5_point_cache", default=None)
+          pstats={"hit":0,"miss":0,"batches":0}
+
+          def point_cached_lons(body, datetimes_utc):
+              seq=list(datetimes_utc)
+              cache=point_cache_var.get()
+              if cache is None:
+                  return original_lons(body,seq)
+              keys=[(str(body),x.astimezone(core.UTC).isoformat()) for x in seq]
+              missing_positions=[]
+              missing_times=[]
+              for i,key in enumerate(keys):
+                  if key in cache:
+                      pstats["hit"]+=1
+                  else:
+                      pstats["miss"]+=1
+                      missing_positions.append(i)
+                      missing_times.append(seq[i])
+              if missing_times:
+                  pstats["batches"]+=1
+                  values=np.asarray(original_lons(body,missing_times),dtype=float)
+                  for pos,value in zip(missing_positions,values):
+                      cache[keys[pos]]=float(value)
+              return np.asarray([cache[key] for key in keys],dtype=float)
+
+          core.get_tropical_ecliptic_lons = point_cached_lons
+
+          def run_point(label, use_motion=False):
+              core.planet_motion = vector_motion if use_motion else original_motion
+              outputs=[]
+              t0=time.perf_counter()
+              for case in cases:
+                  token=point_cache_var.set({})
+                  try:
+                      outputs.append(astro_api.compute_horary(**case))
+                  finally:
+                      point_cache_var.reset(token)
+              elapsed=time.perf_counter()-t0
+              print(f"{label}_SECONDS={elapsed:.6f}")
+              print(f"{label}_CACHE_STATS={pstats}")
+              return outputs,elapsed
+
+          point_outputs, point_seconds = run_point("POINT_CACHE", False)
+          print("POINT_CACHE_EXACT_EQUAL=", baseline == point_outputs)
+          pstats["hit"]=pstats["miss"]=pstats["batches"]=0
+          point_both_outputs, point_both_seconds = run_point("POINT_BOTH", True)
+          print("POINT_BOTH_EXACT_EQUAL=", baseline == point_both_outputs)
+          print(f"POINT_CACHE_SPEEDUP={base_seconds/point_seconds:.3f}x")
+          print(f"POINT_BOTH_SPEEDUP={base_seconds/point_both_seconds:.3f}x")
+          if baseline != point_outputs:
+              print("POINT_CACHE_REJECTED")
+          if baseline != point_both_outputs:
+              print("POINT_BOTH_REJECTED")
           PY
