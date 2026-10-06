@@ -1,0 +1,73 @@
+name: Isolated V6 pure fastpath probe
+
+on:
+  pull_request:
+    branches:
+      - chore/v6-pure-perf-base
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: chore/v6-pure-perf-base
+          path: base
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          path: head
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: head/requirements.txt
+      - run: pip install -r head/requirements.txt
+      - name: Compare V6 output and runtime
+        shell: bash
+        run: |
+          cat >/tmp/run_v6_probe.py <<'PY'
+          import json, sys, time
+          root=sys.argv[1]
+          optimized=sys.argv[2]=="1"
+          sys.path.insert(0,root)
+
+          import astro_core as core
+          import horary_topic_routes_v3  # production V4 -> V5
+          import horary_engine_v6 as v6
+          import horary_balance_v31 as v31
+          if optimized:
+              import horary_v6_fastpath_probe  # noqa: F401
+
+          kwargs=dict(
+              question_text="A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?",
+              question_iso="2026-10-05T18:25:23+09:00",
+              topic="contact",
+              timezone_name="Asia/Seoul",
+              place="현재 위치",
+              lat=34.7594,
+              lon=127.6530,
+          )
+
+          core.load_ephemeris()
+          started=time.perf_counter()
+          data=v31.compute_horary(**kwargs)
+          elapsed=time.perf_counter()-started
+          print(f"SECONDS={elapsed:.6f}")
+          print("ENGINE="+str((data.get("meta") or {}).get("horary_engine")))
+          print(json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(",",":")))
+          PY
+
+          (cd base && python /tmp/run_v6_probe.py "$PWD" 0 > /tmp/base.out)
+          (cd head && python /tmp/run_v6_probe.py "$PWD" 1 > /tmp/head.out)
+
+          echo "BASE_$(head -n 1 /tmp/base.out)"
+          echo "HEAD_$(head -n 1 /tmp/head.out)"
+          grep '^ENGINE=' /tmp/base.out
+          grep '^ENGINE=' /tmp/head.out
+          tail -n 1 /tmp/base.out > /tmp/base.json
+          tail -n 1 /tmp/head.out > /tmp/head.json
+          cmp /tmp/base.json /tmp/head.json
+          echo "V6_PURE_FASTPATH_OUTPUT_EXACT_EQUAL=true"
