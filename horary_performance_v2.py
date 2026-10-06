@@ -29,6 +29,7 @@ _ORIGINAL_CORE_LON = core.get_tropical_ecliptic_lon
 _ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
 _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
+_ORIGINAL_REFINE_STATION = v6._refine_station
 _ORIGINAL_FIND_ORB_ENTRY = None
 
 _LON_CACHE_MAXSIZE = 65536
@@ -121,34 +122,43 @@ def _backward_grid(dt_utc, horizon_days: float, step_hours: float):
 
 
 def _next_sign_ingress_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
-    """V6 next-ingress search with identical timestamps, batched."""
+    """V6 next-ingress search on the same coarse timestamps, batched in chunks."""
     start_sign = int(float(row["longitude"]) // 30.0)
     speed = abs(float(row.get("speed_deg_per_day") or 0.0))
     step_hours = 0.5 if body == "Moon" else 2.0 if speed >= 0.5 else 6.0 if speed >= 0.08 else 12.0
-    grid = _forward_grid(dt_utc, horizon_days, step_hours)
-    if len(grid) < 2:
-        return None
+    chunk_days = 3.0 if body == "Moon" else 10.0 if speed >= 0.5 else 30.0
+    end = dt_utc + timedelta(days=float(horizon_days))
+    cursor = dt_utc
 
-    try:
-        lons = np.ravel(core.get_tropical_ecliptic_lons(body, grid[1:]))
-        if lons.size != len(grid) - 1:
-            raise ValueError("ingress vector size mismatch")
-    except Exception:
-        return _ORIGINAL_NEXT_SIGN_INGRESS(body, row, dt_utc, horizon_days=horizon_days)
+    while cursor < end:
+        chunk_end = min(end, cursor + timedelta(days=chunk_days))
+        chunk_horizon_days = (chunk_end - cursor).total_seconds() / 86400.0
+        grid = _forward_grid(cursor, chunk_horizon_days, step_hours)
+        if len(grid) < 2:
+            break
 
-    for index, lon in enumerate(lons, start=1):
-        if int(float(lon) // 30.0) != start_sign:
-            left, right = grid[index - 1], grid[index]
-            exact = v6._refine_sign_ingress(body, left, right, start_sign)
-            return {
-                "type": "sign_ingress",
-                "body": body,
-                "body_ko": core.PLANET_KO.get(body, body),
-                "utc": exact.isoformat(),
-                "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
-                "from_sign_index": start_sign,
-                "to_sign_index": v6._sign_index_at(body, exact + timedelta(seconds=2)),
-            }
+        try:
+            lons = np.ravel(core.get_tropical_ecliptic_lons(body, grid[1:]))
+            if lons.size != len(grid) - 1:
+                raise ValueError("ingress vector size mismatch")
+        except Exception:
+            return _ORIGINAL_NEXT_SIGN_INGRESS(body, row, dt_utc, horizon_days=horizon_days)
+
+        for index, lon in enumerate(lons, start=1):
+            if int(float(lon) // 30.0) != start_sign:
+                left, right = grid[index - 1], grid[index]
+                exact = v6._refine_sign_ingress(body, left, right, start_sign)
+                return {
+                    "type": "sign_ingress",
+                    "body": body,
+                    "body_ko": core.PLANET_KO.get(body, body),
+                    "utc": exact.isoformat(),
+                    "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
+                    "from_sign_index": start_sign,
+                    "to_sign_index": v6._sign_index_at(body, exact + timedelta(seconds=2)),
+                }
+
+        cursor = chunk_end
     return None
 
 
@@ -180,40 +190,68 @@ def _previous_sign_ingress_vector(body: str, row, dt_utc, horizon_days: float = 
             return hi
     return dt_utc - timedelta(days=float(horizon_days))
 
+def _refine_station_vector(body: str, left, right):
+    """Preserve V6's 24-step ternary search while batching each pair of probes."""
+    lo, hi = left, right
+    for _ in range(24):
+        span = hi - lo
+        m1 = lo + span / 3
+        m2 = hi - span / 3
+        speeds = _batch_speeds(body, [m1, m2])
+        if abs(float(speeds[0])) <= abs(float(speeds[1])):
+            hi = m2
+        else:
+            lo = m1
+    return lo + (hi - lo) / 2
+
+
 def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
-    """V6 station search with the exact same coarse timestamps, batched."""
+    """V6 station search on the same coarse timestamps, batched in chunks."""
     step_hours = 3.0 if body in {"Moon", "Mercury", "Venus", "Mars"} else 8.0
     end = dt_utc + timedelta(days=float(horizon_days))
-    times = [dt_utc]
-    left = dt_utc
-    while left < end:
-        right = min(end, left + timedelta(hours=step_hours))
-        times.append(right)
-        left = right
+    chunk_days = 45.0
+    cursor = dt_utc
 
     try:
-        speeds = _batch_speeds(body, times)
+        prev_speed = float(_batch_speeds(body, [dt_utc])[0])
     except Exception:
         return _ORIGINAL_NEXT_STATION(body, row, dt_utc, horizon_days=horizon_days)
 
-    for index in range(1, len(times)):
-        prev_speed = float(speeds[index - 1])
-        speed = float(speeds[index])
-        if (
-            v6._motion_sign(prev_speed) == 0
-            or v6._motion_sign(speed) == 0
-            or v6._motion_sign(prev_speed) != v6._motion_sign(speed)
-        ):
-            exact = v6._refine_station(body, times[index - 1], times[index])
-            return {
-                "type": "station",
-                "body": body,
-                "body_ko": core.PLANET_KO.get(body, body),
-                "utc": exact.isoformat(),
-                "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
-                "speed_before": round(v6._speed_at(body, exact - timedelta(hours=1)), 6),
-                "speed_after": round(v6._speed_at(body, exact + timedelta(hours=1)), 6),
-            }
+    while cursor < end:
+        chunk_end = min(end, cursor + timedelta(days=chunk_days))
+        chunk_horizon_days = (chunk_end - cursor).total_seconds() / 86400.0
+        grid = _forward_grid(cursor, chunk_horizon_days, step_hours)
+        times = grid[1:]
+        if not times:
+            break
+
+        try:
+            speeds = _batch_speeds(body, times)
+        except Exception:
+            return _ORIGINAL_NEXT_STATION(body, row, dt_utc, horizon_days=horizon_days)
+
+        left = cursor
+        for right, speed_value in zip(times, speeds):
+            speed = float(speed_value)
+            if (
+                v6._motion_sign(prev_speed) == 0
+                or v6._motion_sign(speed) == 0
+                or v6._motion_sign(prev_speed) != v6._motion_sign(speed)
+            ):
+                exact = v6._refine_station(body, left, right)
+                return {
+                    "type": "station",
+                    "body": body,
+                    "body_ko": core.PLANET_KO.get(body, body),
+                    "utc": exact.isoformat(),
+                    "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
+                    "speed_before": round(v6._speed_at(body, exact - timedelta(hours=1)), 6),
+                    "speed_after": round(v6._speed_at(body, exact + timedelta(hours=1)), 6),
+                }
+            prev_speed = speed
+            left = right
+
+        cursor = chunk_end
     return None
 
 
@@ -334,11 +372,13 @@ def install() -> bool:
         _next_sign_ingress_vector._lunea_horary_perf_v2 = True
         _previous_sign_ingress_vector._lunea_horary_perf_v2 = True
         _next_station_vector._lunea_horary_perf_v2 = True
+        _refine_station_vector._lunea_horary_perf_v2 = True
 
         core.get_tropical_ecliptic_lon = _cached_core_lon
         v6._next_sign_ingress = _next_sign_ingress_vector
         v6._previous_sign_ingress = _previous_sign_ingress_vector
         v6._next_station = _next_station_vector
+        v6._refine_station = _refine_station_vector
         changed = True
 
     # Preserve the old full-chain behavior when Future Window was imported
