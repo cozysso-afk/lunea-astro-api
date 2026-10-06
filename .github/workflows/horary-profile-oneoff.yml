@@ -122,3 +122,147 @@ jobs:
           for key,n in counts.most_common():
               print("PAIR",key[0],key[3],"count=",n)
           PY
+
+      - name: Prototype V5 no-policy-change performance layer
+        shell: bash
+        run: |
+          python - <<'PY'
+          from collections import OrderedDict
+          from copy import deepcopy
+          from datetime import datetime
+          from functools import lru_cache
+          from threading import RLock
+          import time
+          import numpy as np
+
+          import astro_api
+          import astro_core as core
+          import horary_balance_v3 as v3
+
+          kwargs=dict(
+              question_text="Horary V5 performance prototype",
+              question_iso="2026-10-06T18:35:00+09:00",
+              topic="general",
+              timezone_name="Asia/Seoul",
+              place="여수",
+          )
+
+          # Warm ephemeris and capture the exact unoptimized baseline.
+          astro_api.compute_horary(**kwargs)
+          t0=time.perf_counter()
+          baseline=astro_api.compute_horary(**kwargs)
+          baseline_seconds=time.perf_counter()-t0
+
+          original_lon=core.get_tropical_ecliptic_lon
+          original_lons=core.get_tropical_ecliptic_lons
+          original_refine=core._horary_refine_pair
+          original_balanced=v3._balanced_perfection_candidate
+
+          scalar_cache=OrderedDict()
+          vector_cache=OrderedDict()
+          lock=RLock()
+          stats={"scalar_hit":0,"scalar_miss":0,"vector_hit":0,"vector_miss":0,"pair_hit":0,"pair_miss":0}
+
+          def scalar_key(body,time_obj):
+              value=np.asarray(getattr(time_obj,"tt"))
+              if value.shape != ():
+                  raise TypeError
+              return str(body),float(value)
+
+          def cached_lon(body,time_obj):
+              try:key=scalar_key(body,time_obj)
+              except Exception:return original_lon(body,time_obj)
+              with lock:
+                  if key in scalar_cache:
+                      stats["scalar_hit"]+=1
+                      scalar_cache.move_to_end(key)
+                      return scalar_cache[key]
+              value=float(original_lon(body,time_obj))
+              with lock:
+                  stats["scalar_miss"]+=1
+                  scalar_cache[key]=value
+                  scalar_cache.move_to_end(key)
+                  while len(scalar_cache)>8192:scalar_cache.popitem(last=False)
+              return value
+
+          def time_key(dt):
+              return dt.astimezone(core.UTC).isoformat()
+
+          def cached_lons(body,times):
+              seq=list(times)
+              key=(str(body),tuple(time_key(x) for x in seq))
+              with lock:
+                  cached=vector_cache.get(key)
+                  if cached is not None:
+                      stats["vector_hit"]+=1
+                      vector_cache.move_to_end(key)
+                      return cached.copy()
+              value=np.asarray(original_lons(body,seq),dtype=float)
+              with lock:
+                  stats["vector_miss"]+=1
+                  vector_cache[key]=value.copy()
+                  vector_cache.move_to_end(key)
+                  while len(vector_cache)>96:vector_cache.popitem(last=False)
+              return value
+
+          def vector_refine(body_a,body_b,aspect_angle,left_dt,right_dt,iterations=12):
+              def orbs(times):
+                  a=np.asarray(core.get_tropical_ecliptic_lons(body_a,times),dtype=float)
+                  b=np.asarray(core.get_tropical_ecliptic_lons(body_b,times),dtype=float)
+                  seps=np.abs((a-b+180.0)%360.0-180.0)
+                  return np.abs(seps-float(aspect_angle))
+              left,right=left_dt,right_dt
+              for _ in range(iterations):
+                  span=right-left
+                  m1=left+span/3
+                  m2=right-span/3
+                  vals=orbs([m1,m2])
+                  if float(vals[0]) <= float(vals[1]):
+                      right=m2
+                  else:
+                      left=m1
+              exact=left+(right-left)/2
+              exact_orb=float(orbs([exact])[0])
+              return exact,exact_orb
+
+          def row_key(row):
+              return round(float(row["longitude"]),12),round(float(row.get("speed_deg_per_day") or 0.0),12)
+
+          @lru_cache(maxsize=2048)
+          def cached_balanced(body_a,a_lon,a_speed,body_b,b_lon,b_speed,dt_iso,tz):
+              stats["pair_miss"]+=1
+              result=original_balanced(
+                  body_a,{"longitude":a_lon,"speed_deg_per_day":a_speed},
+                  body_b,{"longitude":b_lon,"speed_deg_per_day":b_speed},
+                  datetime.fromisoformat(dt_iso),tz,
+              )
+              return deepcopy(result)
+
+          def balanced(body_a,row_a,body_b,row_b,dt_utc,timezone_name):
+              before=cached_balanced.cache_info().hits
+              a_lon,a_speed=row_key(row_a); b_lon,b_speed=row_key(row_b)
+              result=cached_balanced(str(body_a),a_lon,a_speed,str(body_b),b_lon,b_speed,dt_utc.isoformat(),str(timezone_name))
+              if cached_balanced.cache_info().hits>before:stats["pair_hit"]+=1
+              return deepcopy(result)
+
+          core.get_tropical_ecliptic_lon=cached_lon
+          core.get_tropical_ecliptic_lons=cached_lons
+          core._horary_refine_pair=vector_refine
+          v3._balanced_perfection_candidate=balanced
+
+          t1=time.perf_counter()
+          optimized=astro_api.compute_horary(**kwargs)
+          optimized_seconds=time.perf_counter()-t1
+
+          print(f"BASELINE_SECONDS={baseline_seconds:.6f}")
+          print(f"OPTIMIZED_SECONDS={optimized_seconds:.6f}")
+          print(f"SPEEDUP={baseline_seconds/optimized_seconds:.3f}x")
+          print("OUTPUT_EXACT_EQUAL=",baseline==optimized)
+          print("PERF_STATS=",stats)
+          print("PAIR_CACHE=",cached_balanced.cache_info())
+          if baseline != optimized:
+              import json
+              print("BASELINE_JSON=",json.dumps(baseline,ensure_ascii=False,sort_keys=True)[:2000])
+              print("OPTIMIZED_JSON=",json.dumps(optimized,ensure_ascii=False,sort_keys=True)[:2000])
+              raise SystemExit("optimized output differs from baseline")
+          PY
