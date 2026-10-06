@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import numpy as np
+
 import astro_core as core
 import horary_balance_v31 as v31
 
@@ -35,6 +37,7 @@ HORARY_MOIETIES_DEG = {
 _ORIGINAL_ASPECT_LIMIT = core._horary_aspect_limit
 _ORIGINAL_IS_DAY_CHART = v31._is_day_chart
 _ORIGINAL_COMPUTE_HORARY = v31.compute_horary
+_ORIGINAL_REFINE_PAIR = core._horary_refine_pair
 
 
 def _moiety_aspect_limit(body_a, body_b, aspect_key):
@@ -45,6 +48,30 @@ def _moiety_aspect_limit(body_a, body_b, aspect_key):
         return _ORIGINAL_ASPECT_LIMIT(body_a, body_b, aspect_key)
     return float(a + b)
 
+
+
+def _vectorized_refine_pair(body_a, body_b, aspect_angle, left_dt, right_dt, iterations=12):
+    """Preserve the ternary-search math while batching each iteration's ephemeris calls."""
+    def orbs(times):
+        a = np.asarray(core.get_tropical_ecliptic_lons(body_a, times), dtype=float)
+        b = np.asarray(core.get_tropical_ecliptic_lons(body_b, times), dtype=float)
+        separations = np.abs((a - b + 180.0) % 360.0 - 180.0)
+        return np.abs(separations - float(aspect_angle))
+
+    left, right = left_dt, right_dt
+    for _ in range(iterations):
+        span = right - left
+        m1 = left + span / 3
+        m2 = right - span / 3
+        values = orbs([m1, m2])
+        if float(values[0]) <= float(values[1]):
+            right = m2
+        else:
+            left = m1
+
+    exact = left + (right - left) / 2
+    exact_orb = float(orbs([exact])[0])
+    return exact, exact_orb
 
 def _parse_utc(value):
     raw = str(value or "").strip().replace("Z", "+00:00")
@@ -130,6 +157,7 @@ def _compute_horary_v5(*args, **kwargs):
 
 
 core._horary_aspect_limit = _moiety_aspect_limit
+core._horary_refine_pair = _vectorized_refine_pair
 v31._is_day_chart = _is_day_chart_altitude
 
 if not getattr(v31.compute_horary, "_lunea_engine_v5", False):
