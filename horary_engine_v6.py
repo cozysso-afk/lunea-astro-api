@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from contextvars import ContextVar
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -30,6 +31,9 @@ import horary_balance_v31 as v31
 VERSION = "LUNEA_HORARY_ENGINE_V6_STRICT_TRADITIONAL_CORE"
 _CONTEXT_DT_UTC: ContextVar[datetime | None] = ContextVar(
     "lunea_horary_v6_dt_utc", default=None
+)
+_STRICT_PERFECTION_CACHE: ContextVar[dict | None] = ContextVar(
+    "lunea_horary_v6_strict_perfection_cache", default=None
 )
 _ORIGINAL_COMPUTE_HORARY = v31.compute_horary
 
@@ -382,7 +386,7 @@ def _station_breaks_application(body_a, body_b, angle, station_dt: datetime) -> 
         return True
 
 
-def _strict_perfection_candidate(body_a, row_a, body_b, row_b, dt_utc, timezone_name):
+def _strict_perfection_candidate_uncached(body_a, row_a, body_b, row_b, dt_utc, timezone_name):
     if body_a == body_b:
         return {
             "perfects": False,
@@ -536,6 +540,31 @@ def _strict_perfection_candidate(body_a, row_a, body_b, row_b, dt_utc, timezone_
         "first_event": events[0] if events else None,
     }
 
+
+
+def _strict_perfection_candidate(body_a, row_a, body_b, row_b, dt_utc, timezone_name):
+    """Reuse identical strict-perfection work only within one V6 Horary request."""
+    cache = _STRICT_PERFECTION_CACHE.get()
+    if cache is None:
+        return _strict_perfection_candidate_uncached(
+            body_a, row_a, body_b, row_b, dt_utc, timezone_name
+        )
+
+    key = (
+        str(body_a),
+        float(row_a["longitude"]),
+        float(row_a.get("speed_deg_per_day") or 0.0),
+        str(body_b),
+        float(row_b["longitude"]),
+        float(row_b.get("speed_deg_per_day") or 0.0),
+        dt_utc.isoformat(),
+        str(timezone_name),
+    )
+    if key not in cache:
+        cache[key] = _strict_perfection_candidate_uncached(
+            body_a, row_a, body_b, row_b, dt_utc, timezone_name
+        )
+    return deepcopy(cache[key])
 
 def _exact_events_between(body_a: str, body_b: str, start_dt: datetime, end_dt: datetime):
     if end_dt <= start_dt:
@@ -1069,12 +1098,14 @@ def _compute_horary_v6(*args, **kwargs):
     except Exception:
         dt_utc = None
 
-    token = _CONTEXT_DT_UTC.set(dt_utc)
+    context_token = _CONTEXT_DT_UTC.set(dt_utc)
+    perfection_token = _STRICT_PERFECTION_CACHE.set({})
     try:
         data = _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
         return _postprocess(data, timezone_name)
     finally:
-        _CONTEXT_DT_UTC.reset(token)
+        _STRICT_PERFECTION_CACHE.reset(perfection_token)
+        _CONTEXT_DT_UTC.reset(context_token)
 
 
 core._horary_aspect_state = _strict_aspect_state
