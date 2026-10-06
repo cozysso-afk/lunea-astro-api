@@ -4,6 +4,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import numpy as np
+
 import horary_topic_routes_v3  # noqa: F401 - install full production chain
 import astro_core as core
 import horary_engine_v6 as v6
@@ -81,6 +83,42 @@ class HoraryPerformanceV2Tests(unittest.TestCase):
             "Mercury", row, moment, horizon_days=60.0
         )
         self.assertEqual(scalar, vector)
+
+    def test_shared_pair_grid_matches_independent_vector_longitudes_exactly(self):
+        start = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
+        times = [start + timedelta(hours=6 * i) for i in range(8)]
+
+        expected_a = np.asarray(core.get_tropical_ecliptic_lons("Moon", times), dtype=float)
+        expected_b = np.asarray(core.get_tropical_ecliptic_lons("Venus", times), dtype=float)
+        actual_a, actual_b = perf2._shared_pair_lons("Moon", "Venus", times)
+
+        self.assertTrue(np.array_equal(expected_a, actual_a))
+        self.assertTrue(np.array_equal(expected_b, actual_b))
+
+    def test_shared_exact_aspect_search_matches_original_contract(self):
+        start = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
+        end = start + timedelta(days=30)
+        for angle in (0.0, 60.0, 90.0, 120.0, 180.0):
+            with self.subTest(angle=angle):
+                scalar = perf2._ORIGINAL_FIND_EXACT_ASPECT(
+                    "Moon", "Venus", angle, start, end
+                )
+                shared = perf2._find_exact_aspect_shared(
+                    "Moon", "Venus", angle, start, end
+                )
+                self.assertEqual(scalar, shared)
+
+    def test_shared_exact_events_match_original_contract(self):
+        start = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
+        end = start + timedelta(days=5)
+
+        scalar = perf2._ORIGINAL_EXACT_EVENTS_BETWEEN(
+            "Moon", "Venus", start, end
+        )
+        shared = perf2._exact_events_between_shared(
+            "Moon", "Venus", start, end
+        )
+        self.assertEqual(scalar, shared)
 
     def test_orb_entry_vector_matches_scalar_search_and_refinement(self):
         start = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
