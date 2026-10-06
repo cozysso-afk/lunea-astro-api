@@ -134,11 +134,14 @@ class HoraryFutureWindowV2Tests(unittest.TestCase):
         self.assertEqual(before_j["perfection"], after_j["perfection"])
         self.assertEqual(before_j["reception"], after_j["reception"])
         self.assertEqual(before_j["moon_course"], after_j["moon_course"])
-        self.assertEqual(before_j["essential_dignities_v7"], after_j["essential_dignities_v7"])
-        self.assertEqual(
-            before_j["judgment_hierarchy_v8"]["qualified_evidence_grade_v8"],
-            after_j["judgment_hierarchy_v8"]["qualified_evidence_grade_v8"],
-        )
+        self.assertEqual(before_j.get("traditional_core_v6"), after_j.get("traditional_core_v6"))
+
+        # V7/V8 are optional layers outside the production V5 rollback chain.
+        # If explicitly installed, Future Window must preserve them; otherwise
+        # their absence is a valid baseline.
+        for key in ("essential_dignities_v7", "judgment_hierarchy_v8"):
+            if key in before_j or key in after_j:
+                self.assertEqual(before_j.get(key), after_j.get(key))
 
 
 if __name__ == "__main__":
