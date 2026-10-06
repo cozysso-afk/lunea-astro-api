@@ -155,9 +155,15 @@ def _request_cached_lons(body_name, datetimes_utc):
             missing_times.append(seq[index])
 
     if missing_times:
-        values = np.asarray(_ORIGINAL_VECTOR_LONS(body_name, missing_times), dtype=float)
-        for index, value in zip(missing_positions, values):
-            cache[keys[index]] = float(value)
+        prepared_cache = _PREPARED_GRID_CACHE.get()
+        if prepared_cache is not None:
+            # Reuse the same prepared Skyfield observer when another body asks
+            # for the identical missing time grid later in this request.
+            _prepared_many_lons((str(body_name),), missing_times)
+        else:
+            values = np.asarray(_ORIGINAL_VECTOR_LONS(body_name, missing_times), dtype=float)
+            for index, value in zip(missing_positions, values):
+                cache[keys[index]] = float(value)
 
     return np.asarray([cache[key] for key in keys], dtype=float)
 
