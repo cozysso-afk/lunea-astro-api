@@ -11,6 +11,9 @@ post-processing cannot mutate a cached value.
 from copy import deepcopy
 from functools import lru_cache
 
+import numpy as np
+
+import astro_core as core
 import horary_engine_v6 as v6
 
 
@@ -134,6 +137,72 @@ def _next_station(body: str, row, dt_utc, horizon_days: float = 180.0):
     )
 
 
+def _prepared_pair_lons(body_a: str, body_b: str, times):
+    """Evaluate both bodies against one prepared Skyfield observer/time grid."""
+    seq = list(times)
+    if not seq:
+        return {
+            str(body_a): np.asarray([], dtype=float),
+            str(body_b): np.asarray([], dtype=float),
+        }
+
+    ts, _, earth, targets, _, _, _ = core.load_ephemeris()
+    sf_times = ts.from_datetimes([dt.astimezone(core.UTC) for dt in seq])
+    observer = earth.at(sf_times)
+
+    out = {}
+    for body in dict.fromkeys((str(body_a), str(body_b))):
+        apparent = observer.observe(targets[body]).apparent()
+        _, lon, _ = apparent.frame_latlon(core.ecliptic_frame)
+        values = np.ravel(np.asarray(lon.degrees, dtype=float))
+        if values.size != len(seq):
+            raise ValueError(
+                f"{body} prepared pair longitude shape mismatch: "
+                f"{values.size} values for {len(seq)} datetimes"
+            )
+        out[body] = np.mod(values, 360.0)
+    return out
+
+
+def _find_exact_aspect_prepared(
+    body_a: str,
+    body_b: str,
+    angle: float,
+    dt_utc,
+    end_dt,
+):
+    """Same V6 exact-aspect search, sharing only the Skyfield prepared grid."""
+    if end_dt <= dt_utc:
+        return None
+    span_days = max(0.01, (end_dt - dt_utc).total_seconds() / 86400.0)
+    step_hours = 0.5 if "Moon" in {body_a, body_b} else 1.5 if span_days < 7 else 3.0
+    times = list(core._sample_datetimes(dt_utc, end_dt, step_hours))
+    if len(times) < 2:
+        return None
+
+    lons = _prepared_pair_lons(body_a, body_b, times)
+    a_lons = lons[str(body_a)]
+    b_lons = lons[str(body_b)]
+    seps = np.abs((a_lons - b_lons + 180.0) % 360.0 - 180.0)
+    errors = np.abs(seps - float(angle))
+    idx = int(np.argmin(errors))
+    if idx == 0 or float(errors[idx]) > 1.25:
+        return None
+    left = times[max(0, idx - 1)]
+    right = times[min(len(times) - 1, idx + 1)]
+    if right <= left:
+        return None
+    exact, orb = v6._refine_exact_aspect(body_a, body_b, angle, left, right)
+    if exact < dt_utc or exact > end_dt or orb > v6.ASPECT_EXACT_TOL:
+        return None
+    return {
+        "type": "exact_aspect",
+        "utc": exact.isoformat(),
+        "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
+        "exact_orb": round(orb, 6),
+    }
+
+
 @lru_cache(maxsize=1024)
 def _cached_find_exact_aspect(
     body_a: str,
@@ -142,13 +211,24 @@ def _cached_find_exact_aspect(
     dt_iso: str,
     end_iso: str,
 ):
-    result = _ORIGINAL_FIND_EXACT_ASPECT(
-        body_a,
-        body_b,
-        float(angle),
-        v6._parse_utc(dt_iso),
-        v6._parse_utc(end_iso),
-    )
+    start_dt = v6._parse_utc(dt_iso)
+    end_dt = v6._parse_utc(end_iso)
+    try:
+        result = _find_exact_aspect_prepared(
+            body_a,
+            body_b,
+            float(angle),
+            start_dt,
+            end_dt,
+        )
+    except Exception:
+        result = _ORIGINAL_FIND_EXACT_ASPECT(
+            body_a,
+            body_b,
+            float(angle),
+            start_dt,
+            end_dt,
+        )
     return deepcopy(result)
 
 
