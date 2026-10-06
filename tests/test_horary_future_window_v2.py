@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from datetime import timedelta
+from unittest.mock import patch
 
 import horary_topic_routes_v3  # noqa: F401
 import horary_balance_v31 as v31
@@ -43,6 +45,66 @@ class HoraryFutureWindowV2Tests(unittest.TestCase):
                 self.assertIsNotNone(row)
                 self.assertEqual(row["start_date"].isoformat(), expected[0])
                 self.assertEqual(row["end_date"].isoformat(), expected[1])
+
+    def test_vector_ingress_scan_matches_scalar_contract(self):
+        start = fw2.v6._parse_utc("2026-10-01T00:00:00+00:00")
+        end = start + timedelta(hours=4)
+        transition = start + timedelta(hours=1, minutes=30)
+
+        def sign_at(_body, when):
+            return 0 if when < transition else 1
+
+        def lons(_body, times):
+            return [29.0 if when < transition else 31.0 for when in times]
+
+        def refine(_body, left, right, from_sign):
+            self.assertEqual(from_sign, 0)
+            self.assertLessEqual(left, transition)
+            self.assertGreaterEqual(right, transition)
+            return transition
+
+        def scalar_reference():
+            step = timedelta(minutes=60)
+            out = []
+            left = start
+            left_sign = fw2.v6._sign_index_at("Mercury", left)
+            while left < end:
+                right = min(end, left + step)
+                right_sign = fw2.v6._sign_index_at("Mercury", right)
+                if right_sign != left_sign:
+                    exact = fw2.v6._refine_sign_ingress("Mercury", left, right, left_sign)
+                    to_sign = fw2.v6._sign_index_at("Mercury", exact + timedelta(seconds=2))
+                    out.append({
+                        "type": "sign_ingress",
+                        "body": "Mercury",
+                        "body_ko": fw2.core.PLANET_KO.get("Mercury", "Mercury"),
+                        "utc": exact.isoformat(),
+                        "time_local": fw2._local(exact, "Asia/Seoul"),
+                        "from_sign_index": left_sign,
+                        "to_sign_index": to_sign,
+                        "from_sign_en": fw2.core.SIGNS_EN[left_sign],
+                        "to_sign_en": fw2.core.SIGNS_EN[to_sign],
+                        "from_sign_ko": fw2._SIGN_KO[left_sign],
+                        "to_sign_ko": fw2._SIGN_KO[to_sign],
+                    })
+                    left = exact + timedelta(seconds=3)
+                    left_sign = fw2.v6._sign_index_at("Mercury", left)
+                    continue
+                left = right
+                left_sign = right_sign
+            return out
+
+        with (
+            patch.object(fw2.v6, "_sign_index_at", side_effect=sign_at),
+            patch.object(fw2.v6, "_refine_sign_ingress", side_effect=refine),
+            patch.object(fw2.core, "get_tropical_ecliptic_lons", side_effect=lons),
+        ):
+            expected = scalar_reference()
+            actual = fw2._all_ingresses("Mercury", start, end, "Asia/Seoul")
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(actual), 1)
+        self.assertEqual(actual[0]["utc"], transition.isoformat())
 
     def test_requested_stock_range_tracks_full_window_without_mutating_current_judgment(self):
         before = calc(fw2._ORIGINAL_COMPUTE_HORARY)
