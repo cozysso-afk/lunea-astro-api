@@ -11,6 +11,10 @@ post-processing cannot mutate a cached value.
 from copy import deepcopy
 from functools import lru_cache
 
+import numpy as np
+import swisseph as swe
+
+import astro_core as core
 import horary_engine_v6 as v6
 
 
@@ -134,6 +138,72 @@ def _next_station(body: str, row, dt_utc, horizon_days: float = 180.0):
     )
 
 
+_SWEPH_PLANETS = {
+    "Sun": swe.SUN,
+    "Moon": swe.MOON,
+    "Mercury": swe.MERCURY,
+    "Venus": swe.VENUS,
+    "Mars": swe.MARS,
+    "Jupiter": swe.JUPITER,
+    "Saturn": swe.SATURN,
+}
+
+
+def _swiss_coarse_lons(body: str, times):
+    planet = _SWEPH_PLANETS.get(str(body))
+    if planet is None:
+        raise KeyError(body)
+    flags = swe.FLG_SWIEPH
+    return np.fromiter(
+        (
+            float(swe.calc_ut(core.to_jd_ut(dt), planet, flags)[0][0] % 360.0)
+            for dt in times
+        ),
+        dtype=float,
+        count=len(times),
+    )
+
+
+def _find_exact_aspect_swiss_coarse(
+    body_a: str,
+    body_b: str,
+    angle: float,
+    dt_utc,
+    end_dt,
+):
+    """Use Swiss only for V6 coarse bracketing; retain Skyfield exact refinement."""
+    if end_dt <= dt_utc:
+        return None
+    span_days = max(0.01, (end_dt - dt_utc).total_seconds() / 86400.0)
+    step_hours = 0.5 if "Moon" in {body_a, body_b} else 1.5 if span_days < 7 else 3.0
+    times = list(core._sample_datetimes(dt_utc, end_dt, step_hours))
+    if len(times) < 2:
+        return None
+
+    a_lons = _swiss_coarse_lons(body_a, times)
+    b_lons = _swiss_coarse_lons(body_b, times)
+    seps = np.abs((a_lons - b_lons + 180.0) % 360.0 - 180.0)
+    errors = np.abs(seps - float(angle))
+    idx = int(np.argmin(errors))
+    if idx == 0 or float(errors[idx]) > 1.25:
+        return None
+
+    left = times[max(0, idx - 1)]
+    right = times[min(len(times) - 1, idx + 1)]
+    if right <= left:
+        return None
+
+    exact, orb = v6._refine_exact_aspect(body_a, body_b, angle, left, right)
+    if exact < dt_utc or exact > end_dt or orb > v6.ASPECT_EXACT_TOL:
+        return None
+    return {
+        "type": "exact_aspect",
+        "utc": exact.isoformat(),
+        "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
+        "exact_orb": round(orb, 6),
+    }
+
+
 @lru_cache(maxsize=1024)
 def _cached_find_exact_aspect(
     body_a: str,
@@ -142,13 +212,24 @@ def _cached_find_exact_aspect(
     dt_iso: str,
     end_iso: str,
 ):
-    result = _ORIGINAL_FIND_EXACT_ASPECT(
-        body_a,
-        body_b,
-        float(angle),
-        v6._parse_utc(dt_iso),
-        v6._parse_utc(end_iso),
-    )
+    start_dt = v6._parse_utc(dt_iso)
+    end_dt = v6._parse_utc(end_iso)
+    try:
+        result = _find_exact_aspect_swiss_coarse(
+            body_a,
+            body_b,
+            float(angle),
+            start_dt,
+            end_dt,
+        )
+    except Exception:
+        result = _ORIGINAL_FIND_EXACT_ASPECT(
+            body_a,
+            body_b,
+            float(angle),
+            start_dt,
+            end_dt,
+        )
     return deepcopy(result)
 
 
