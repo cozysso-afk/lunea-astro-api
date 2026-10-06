@@ -1,4 +1,4 @@
-name: One-off pure V6 comparison
+name: One-off decoupled V6 profile
 
 on:
   pull_request:
@@ -16,69 +16,24 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       - run: pip install -r requirements.txt
-      - name: Compare production V5 and pure V6
+      - name: Profile decoupled optimized V6
         shell: bash
         run: |
           python - <<'PY'
-          import time
-          import astro_core as core
-          import horary_topic_routes_v3  # V4 -> production V5
-          import horary_balance_v31 as v31
-
-          kwargs = dict(
-              question_text="A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?",
-              question_iso="2026-10-05T18:25:23+09:00",
-              topic="contact",
-              timezone_name="Asia/Seoul",
-              place="현재 위치",
-              lat=34.7594,
-              lon=127.6530,
-          )
-
-          core.load_ephemeris()
-
-          t0=time.perf_counter()
-          v5=v31.compute_horary(**kwargs)
-          v5_seconds=time.perf_counter()-t0
-          print(f"PURE_COMPARE_V5_SECONDS={v5_seconds:.6f}")
-          print("PURE_COMPARE_V5_ENGINE=", (v5.get("meta") or {}).get("horary_engine"))
-
-          import horary_engine_v6 as v6  # explicit V6 patch only; no perf v1/v2
-
-          t0=time.perf_counter()
-          out=v31.compute_horary(**kwargs)
-          v6_seconds=time.perf_counter()-t0
-          print(f"PURE_COMPARE_V6_SECONDS={v6_seconds:.6f}")
-          print("PURE_COMPARE_V6_ENGINE=", (out.get("meta") or {}).get("horary_engine"))
-          print(f"PURE_COMPARE_V6_INCREMENT={v6_seconds-v5_seconds:.6f}")
-          print(f"PURE_COMPARE_RATIO={v6_seconds/v5_seconds:.3f}x")
-
-          assert (v5.get("meta") or {}).get("horary_engine") == "LUNEA_HORARY_ENGINE_V5_MOIETY_SECT"
-          assert (out.get("meta") or {}).get("horary_engine") == v6.VERSION
-          assert "traditional_core_v6" in (out.get("judgment_support") or {})
-          PY
-
-          python - <<'PY'
+          import cProfile
+          import io
+          import pstats
           import sys
           import time
-          import types
 
           import astro_core as core
-          import horary_topic_routes_v3  # V4 -> V5
+          import horary_topic_routes_v3
           import horary_engine_v6 as v6
           import horary_balance_v31 as v31
-
-          # Benchmark only the V6 optimization portion of performance_v2.
-          # Prevent its historical top-level Future Window import from installing
-          # the Future Window calculation chain during this isolated canary.
-          stub = types.ModuleType("horary_future_window_v2")
-          def _unused_find_orb_entry(*args, **kwargs):
-              raise AssertionError("Future Window must not run in V6-only canary")
-          stub._find_orb_entry = _unused_find_orb_entry
-          sys.modules["horary_future_window_v2"] = stub
-
           import horary_performance_v2 as perf2
           import horary_performance_v1 as perf1
+
+          assert "horary_future_window_v2" not in sys.modules
 
           kwargs = dict(
               question_text="A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?",
@@ -94,11 +49,23 @@ jobs:
           perf2.clear_caches()
           perf1.clear_caches()
 
-          t0=time.perf_counter()
+          profiler=cProfile.Profile()
+          started=time.perf_counter()
+          profiler.enable()
           out=v31.compute_horary(**kwargs)
-          elapsed=time.perf_counter()-t0
-          print(f"DECOUPLED_V6_OPT_SECONDS={elapsed:.6f}")
-          print("DECOUPLED_V6_OPT_ENGINE=", (out.get("meta") or {}).get("horary_engine"))
+          profiler.disable()
+          elapsed=time.perf_counter()-started
+
+          print(f"DECOUPLED_V6_PROFILE_SECONDS={elapsed:.6f}")
+          print("DECOUPLED_V6_PROFILE_ENGINE=", (out.get("meta") or {}).get("horary_engine"))
+          print("DECOUPLED_V6_FUTURE_WINDOW_LOADED=", "horary_future_window_v2" in sys.modules)
           assert (out.get("meta") or {}).get("horary_engine") == v6.VERSION
           assert "traditional_core_v6" in (out.get("judgment_support") or {})
+          assert "horary_future_window_v2" not in sys.modules
+
+          buf=io.StringIO()
+          pstats.Stats(profiler,stream=buf).strip_dirs().sort_stats("cumulative").print_stats(60)
+          print("DECOUPLED_V6_CPROFILE_BEGIN")
+          print(buf.getvalue())
+          print("DECOUPLED_V6_CPROFILE_END")
           PY
