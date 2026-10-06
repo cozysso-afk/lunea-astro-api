@@ -13,13 +13,14 @@ left untouched. Scalar refinement still uses the existing engine functions.
 
 from collections import OrderedDict
 from datetime import timedelta
+import importlib
+import sys
 from threading import RLock
 
 import numpy as np
 
 import astro_core as core
 import horary_engine_v6 as v6
-import horary_future_window_v2 as fw2
 
 
 VERSION = "LUNEA_HORARY_PERFORMANCE_V2_HOTSPOT_BATCH"
@@ -28,7 +29,7 @@ _ORIGINAL_CORE_LON = core.get_tropical_ecliptic_lon
 _ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
 _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
-_ORIGINAL_FIND_ORB_ENTRY = fw2._find_orb_entry
+_ORIGINAL_FIND_ORB_ENTRY = None
 
 _LON_CACHE_MAXSIZE = 65536
 _lon_cache: OrderedDict[tuple[str, float], float] = OrderedDict()
@@ -216,6 +217,29 @@ def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
     return None
 
 
+def _loaded_future_window_module():
+    """Return Future Window only when another caller already installed it."""
+    return sys.modules.get("horary_future_window_v2")
+
+
+def _future_window_module():
+    """Load Future Window only for code paths that explicitly need it."""
+    module = _loaded_future_window_module()
+    if module is None:
+        module = importlib.import_module("horary_future_window_v2")
+    return module
+
+
+def _capture_original_find_orb_entry(module):
+    global _ORIGINAL_FIND_ORB_ENTRY
+    if _ORIGINAL_FIND_ORB_ENTRY is None:
+        current = module._find_orb_entry
+        if getattr(current, "_lunea_horary_perf_v2", False):
+            raise RuntimeError("Future Window orb-entry original was not captured before patching")
+        _ORIGINAL_FIND_ORB_ENTRY = current
+    return _ORIGINAL_FIND_ORB_ENTRY
+
+
 def _aspect_errors_vector(body_a: str, body_b: str, angle: float, times):
     if not times:
         return np.asarray([], dtype=float)
@@ -227,6 +251,8 @@ def _aspect_errors_vector(body_a: str, body_b: str, angle: float, times):
 
 def _find_orb_entry_vector(body_a: str, body_b: str, angle: float, limit: float, start, end):
     """Future Window orb-entry search with unchanged grid/refinement semantics."""
+    fw2 = _future_window_module()
+    original_find_orb_entry = _capture_original_find_orb_entry(fw2)
     if end <= start:
         return None
 
@@ -241,7 +267,7 @@ def _find_orb_entry_vector(body_a: str, body_b: str, angle: float, limit: float,
     try:
         errors = _aspect_errors_vector(body_a, body_b, angle, times)
     except Exception:
-        return _ORIGINAL_FIND_ORB_ENTRY(body_a, body_b, angle, limit, start, end)
+        return original_find_orb_entry(body_a, body_b, angle, limit, start, end)
 
     if not len(errors):
         return None
@@ -287,22 +313,37 @@ def cache_info() -> dict:
         }
 
 
-def install() -> bool:
-    if getattr(core.get_tropical_ecliptic_lon, "_lunea_horary_perf_v2", False):
+def install_future_window() -> bool:
+    """Patch Future Window only if that optional layer is already loaded."""
+    fw2 = _loaded_future_window_module()
+    if fw2 is None:
+        return False
+    if getattr(fw2._find_orb_entry, "_lunea_horary_perf_v2", False):
         return False
 
-    _cached_core_lon._lunea_horary_perf_v2 = True
-    _next_sign_ingress_vector._lunea_horary_perf_v2 = True
-    _previous_sign_ingress_vector._lunea_horary_perf_v2 = True
-    _next_station_vector._lunea_horary_perf_v2 = True
+    _capture_original_find_orb_entry(fw2)
     _find_orb_entry_vector._lunea_horary_perf_v2 = True
-
-    core.get_tropical_ecliptic_lon = _cached_core_lon
-    v6._next_sign_ingress = _next_sign_ingress_vector
-    v6._previous_sign_ingress = _previous_sign_ingress_vector
-    v6._next_station = _next_station_vector
     fw2._find_orb_entry = _find_orb_entry_vector
     return True
+
+
+def install() -> bool:
+    changed = False
+    if not getattr(core.get_tropical_ecliptic_lon, "_lunea_horary_perf_v2", False):
+        _cached_core_lon._lunea_horary_perf_v2 = True
+        _next_sign_ingress_vector._lunea_horary_perf_v2 = True
+        _previous_sign_ingress_vector._lunea_horary_perf_v2 = True
+        _next_station_vector._lunea_horary_perf_v2 = True
+
+        core.get_tropical_ecliptic_lon = _cached_core_lon
+        v6._next_sign_ingress = _next_sign_ingress_vector
+        v6._previous_sign_ingress = _previous_sign_ingress_vector
+        v6._next_station = _next_station_vector
+        changed = True
+
+    # Preserve the old full-chain behavior when Future Window was imported
+    # before this module, without importing/activating Future Window for V6-only.
+    return install_future_window() or changed
 
 
 install()
