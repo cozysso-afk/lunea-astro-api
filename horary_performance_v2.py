@@ -12,6 +12,7 @@ left untouched. Scalar refinement still uses the existing engine functions.
 """
 
 from collections import OrderedDict
+from contextvars import ContextVar
 from datetime import timedelta
 import importlib
 import sys
@@ -20,12 +21,15 @@ from threading import RLock
 import numpy as np
 
 import astro_core as core
+import horary_balance_v31 as v31
 import horary_engine_v6 as v6
 
 
 VERSION = "LUNEA_HORARY_PERFORMANCE_V2_HOTSPOT_BATCH"
 
 _ORIGINAL_CORE_LON = core.get_tropical_ecliptic_lon
+_ORIGINAL_VECTOR_LONS = core.get_tropical_ecliptic_lons
+_ORIGINAL_COMPUTE_HORARY = v31.compute_horary
 _ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
 _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
@@ -37,6 +41,9 @@ _lon_cache: OrderedDict[tuple[str, float], float] = OrderedDict()
 _lon_lock = RLock()
 _lon_hits = 0
 _lon_misses = 0
+_VECTOR_GRID_CACHE = ContextVar("lunea_v6_vector_grid_cache", default=None)
+_vector_grid_hits = 0
+_vector_grid_misses = 0
 
 
 def _scalar_tt(time_obj) -> float:
@@ -70,6 +77,41 @@ def _cached_core_lon(body_name, time_obj):
             _lon_cache.popitem(last=False)
     return value
 
+
+
+def _request_cached_vector_lons(body_name, datetimes_utc):
+    """Reuse an identical vector longitude grid only within one V6 request."""
+    global _vector_grid_hits, _vector_grid_misses
+    seq = list(datetimes_utc)
+    cache = _VECTOR_GRID_CACHE.get()
+    if cache is None or not seq:
+        return _ORIGINAL_VECTOR_LONS(body_name, seq)
+
+    try:
+        key = (
+            str(body_name),
+            tuple(dt.astimezone(core.UTC).isoformat() for dt in seq),
+        )
+    except Exception:
+        return _ORIGINAL_VECTOR_LONS(body_name, seq)
+
+    cached = cache.get(key)
+    if cached is not None:
+        _vector_grid_hits += 1
+        return cached.copy()
+
+    values = np.asarray(_ORIGINAL_VECTOR_LONS(body_name, seq), dtype=float)
+    _vector_grid_misses += 1
+    cache[key] = values.copy()
+    return values
+
+
+def _compute_horary_perf_v2(*args, **kwargs):
+    token = _VECTOR_GRID_CACHE.set({})
+    try:
+        return _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
+    finally:
+        _VECTOR_GRID_CACHE.reset(token)
 
 def _motion_window_hours(body: str) -> float:
     if body == "Moon":
@@ -332,11 +374,13 @@ def _find_orb_entry_vector(body_a: str, body_b: str, angle: float, limit: float,
 
 
 def clear_caches() -> None:
-    global _lon_hits, _lon_misses
+    global _lon_hits, _lon_misses, _vector_grid_hits, _vector_grid_misses
     with _lon_lock:
         _lon_cache.clear()
         _lon_hits = 0
         _lon_misses = 0
+    _vector_grid_hits = 0
+    _vector_grid_misses = 0
 
 
 def cache_info() -> dict:
@@ -347,7 +391,11 @@ def cache_info() -> dict:
                 "maxsize": _LON_CACHE_MAXSIZE,
                 "hits": _lon_hits,
                 "misses": _lon_misses,
-            }
+            },
+            "vector_grid": {
+                "hits": _vector_grid_hits,
+                "misses": _vector_grid_misses,
+            },
         }
 
 
@@ -375,6 +423,10 @@ def install() -> bool:
         _refine_station_vector._lunea_horary_perf_v2 = True
 
         core.get_tropical_ecliptic_lon = _cached_core_lon
+        core.get_tropical_ecliptic_lons = _request_cached_vector_lons
+        if not getattr(v31.compute_horary, "_lunea_horary_perf_v2_request", False):
+            _compute_horary_perf_v2._lunea_horary_perf_v2_request = True
+            v31.compute_horary = _compute_horary_perf_v2
         v6._next_sign_ingress = _next_sign_ingress_vector
         v6._previous_sign_ingress = _previous_sign_ingress_vector
         v6._next_station = _next_station_vector
