@@ -43,7 +43,7 @@ def main() -> None:
 
     print(f"HORARY_V5_ROLLBACK_SECONDS={elapsed:.6f}")
     print(f"HORARY_V5_ROLLBACK_ENGINE={(data.get('meta') or {}).get('horary_engine')}")
-    assert elapsed < 15.0, f"V5 rollback fast path regressed to {elapsed:.3f}s"
+    assert elapsed < 5.0, f"V5 rollback fast path regressed to {elapsed:.3f}s"
 
 
 if __name__ == "__main__":
