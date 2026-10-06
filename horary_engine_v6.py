@@ -10,7 +10,6 @@ import numpy as np
 import astro_core as core
 import horary_balance_v3 as v3
 import horary_balance_v31 as v31
-import horary_engine_v5 as v5
 
 
 # LUNEA HORARY ENGINE V6
@@ -1070,16 +1069,12 @@ def _compute_horary_v6(*args, **kwargs):
     except Exception:
         dt_utc = None
 
-    context_token = _CONTEXT_DT_UTC.set(dt_utc)
-    lon_token = v5._REQUEST_LON_CACHE.set({})
-    grid_token = v5._PREPARED_GRID_CACHE.set({})
+    token = _CONTEXT_DT_UTC.set(dt_utc)
     try:
         data = _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
         return _postprocess(data, timezone_name)
     finally:
-        v5._PREPARED_GRID_CACHE.reset(grid_token)
-        v5._REQUEST_LON_CACHE.reset(lon_token)
-        _CONTEXT_DT_UTC.reset(context_token)
+        _CONTEXT_DT_UTC.reset(token)
 
 
 core._horary_aspect_state = _strict_aspect_state
