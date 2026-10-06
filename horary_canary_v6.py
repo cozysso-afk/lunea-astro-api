@@ -18,16 +18,19 @@ _CANARY_LOCK = Lock()
 
 
 def compute_horary_v6_canary(payload: dict[str, Any], timeout_seconds: float = 90.0) -> dict:
-    with _CANARY_LOCK:
-        proc = subprocess.run(
-            [sys.executable, "-m", "horary_canary_runner_v6"],
-            input=json.dumps(payload, ensure_ascii=False),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=float(timeout_seconds),
-            check=False,
-        )
+    try:
+        with _CANARY_LOCK:
+            proc = subprocess.run(
+                [sys.executable, "-m", "horary_canary_runner_v6"],
+                input=json.dumps(payload, ensure_ascii=False),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=float(timeout_seconds),
+                check=False,
+            )
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError(f"V6 canary exceeded {float(timeout_seconds):.1f}s") from exc
 
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
