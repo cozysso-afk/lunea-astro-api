@@ -212,7 +212,8 @@ def _eligible_future(perfection, current_state):
     )
 
 
-def _translation_candidates(data, timezone_name):
+def _translation_candidates(data, timezone_name, perfection_fn=None):
+    perfection_fn = perfection_fn or v3._balanced_perfection_candidate
     planets = data.get("planets") or {}
     sig = data.get("significators") or {}
     q = sig.get("querent") or {}
@@ -243,7 +244,7 @@ def _translation_candidates(data, timezone_name):
         for source_name, source_row, source_state, target_name, target_row, target_state in possibilities:
             if source_state.get("phase") != "separating":
                 continue
-            future = v3._balanced_perfection_candidate(
+            future = perfection_fn(
                 third, third_row, target_name, target_row, dt_utc, timezone_name
             )
             if not _eligible_future(future, target_state):
@@ -274,7 +275,8 @@ def _translation_candidates(data, timezone_name):
     return rows[:4]
 
 
-def _collection_candidates(data, timezone_name):
+def _collection_candidates(data, timezone_name, perfection_fn=None):
+    perfection_fn = perfection_fn or v3._balanced_perfection_candidate
     planets = data.get("planets") or {}
     sig = data.get("significators") or {}
     q = sig.get("querent") or {}
@@ -298,8 +300,8 @@ def _collection_candidates(data, timezone_name):
 
         state_q = core._horary_aspect_state(qn, qr, third, third_row)
         state_t = core._horary_aspect_state(tn, tr, third, third_row)
-        pq = v3._balanced_perfection_candidate(qn, qr, third, third_row, dt_utc, timezone_name)
-        pt = v3._balanced_perfection_candidate(tn, tr, third, third_row, dt_utc, timezone_name)
+        pq = perfection_fn(qn, qr, third, third_row, dt_utc, timezone_name)
+        pt = perfection_fn(tn, tr, third, third_row, dt_utc, timezone_name)
         if not (_eligible_future(pq, state_q) and _eligible_future(pt, state_t)):
             continue
 
@@ -336,7 +338,8 @@ def _main_applicant(qn, qr, tn, tr):
     return tn, tr, qn, qr
 
 
-def _confirmed_interventions(data, timezone_name):
+def _confirmed_interventions(data, timezone_name, perfection_fn=None):
+    perfection_fn = perfection_fn or v3._balanced_perfection_candidate
     sig = data.get("significators") or {}
     j = data.get("judgment_support") or {}
     main = j.get("perfection") or {}
@@ -364,7 +367,7 @@ def _confirmed_interventions(data, timezone_name):
         if third not in core.HORARY_PLANETS or third in {qn, tn}:
             continue
         state = core._horary_aspect_state(third, third_row, target_name, target_row)
-        p = v3._balanced_perfection_candidate(
+        p = perfection_fn(
             third, third_row, target_name, target_row, dt_utc, timezone_name
         )
         if not _eligible_future(p, state):
@@ -476,9 +479,31 @@ def _build_balance_v31(data, timezone_name):
         _extended_reception(qn, qr, tn, tr, day_chart)
         if qn and tn and qr and tr else {"grade": "none", "weight": 0.0, "label_ko": "리셉션 없음"}
     )
-    translations = _translation_candidates(data, timezone_name)
-    collections = _collection_candidates(data, timezone_name)
-    interventions = _confirmed_interventions(data, timezone_name)
+
+    # Reuse duplicate V3 future-perfection calculations only inside this
+    # single Horary request. No cross-request cache or policy change.
+    perfection_cache = {}
+
+    def cached_perfection(body_a, row_a, body_b, row_b, dt_utc, tz_name):
+        key = (
+            str(body_a),
+            float(row_a["longitude"]),
+            float(row_a.get("speed_deg_per_day") or 0.0),
+            str(body_b),
+            float(row_b["longitude"]),
+            float(row_b.get("speed_deg_per_day") or 0.0),
+            dt_utc.isoformat(),
+            str(tz_name),
+        )
+        if key not in perfection_cache:
+            perfection_cache[key] = v3._balanced_perfection_candidate(
+                body_a, row_a, body_b, row_b, dt_utc, tz_name
+            )
+        return deepcopy(perfection_cache[key])
+
+    translations = _translation_candidates(data, timezone_name, cached_perfection)
+    collections = _collection_candidates(data, timezone_name, cached_perfection)
+    interventions = _confirmed_interventions(data, timezone_name, cached_perfection)
     refranation = _refranation_pattern(data)
 
     support = list(base.get("supporting_evidence_ko") or [])
