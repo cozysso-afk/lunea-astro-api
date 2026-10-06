@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from contextvars import ContextVar
+from datetime import datetime, timedelta
 
 import numpy as np
 
@@ -38,6 +39,10 @@ _ORIGINAL_ASPECT_LIMIT = core._horary_aspect_limit
 _ORIGINAL_IS_DAY_CHART = v31._is_day_chart
 _ORIGINAL_COMPUTE_HORARY = v31.compute_horary
 _ORIGINAL_REFINE_PAIR = core._horary_refine_pair
+_ORIGINAL_VECTOR_LONS = core.get_tropical_ecliptic_lons
+_ORIGINAL_PLANET_MOTION = core.planet_motion
+
+_REQUEST_LON_CACHE = ContextVar("lunea_horary_v5_request_lon_cache", default=None)
 
 
 def _moiety_aspect_limit(body_a, body_b, aspect_key):
@@ -72,6 +77,59 @@ def _vectorized_refine_pair(body_a, body_b, aspect_angle, left_dt, right_dt, ite
     exact = left + (right - left) / 2
     exact_orb = float(orbs([exact])[0])
     return exact, exact_orb
+
+
+def _request_cached_lons(body_name, datetimes_utc):
+    """Reuse identical body/time ephemeris points only inside one V5 request."""
+    seq = list(datetimes_utc)
+    cache = _REQUEST_LON_CACHE.get()
+    if cache is None or not seq:
+        return _ORIGINAL_VECTOR_LONS(body_name, seq)
+
+    keys = [
+        (str(body_name), dt.astimezone(core.UTC).isoformat())
+        for dt in seq
+    ]
+    missing_positions = []
+    missing_times = []
+    for index, key in enumerate(keys):
+        if key not in cache:
+            missing_positions.append(index)
+            missing_times.append(seq[index])
+
+    if missing_times:
+        values = np.asarray(_ORIGINAL_VECTOR_LONS(body_name, missing_times), dtype=float)
+        for index, value in zip(missing_positions, values):
+            cache[keys[index]] = float(value)
+
+    return np.asarray([cache[key] for key in keys], dtype=float)
+
+
+def _request_vector_planet_motion(body, dt_utc):
+    """Same central-difference motion formula, batched only during a V5 request."""
+    if _REQUEST_LON_CACHE.get() is None:
+        return _ORIGINAL_PLANET_MOTION(body, dt_utc)
+
+    window_hours = (
+        0.25 if body == "Moon"
+        else 1.0 if body in {"Sun", "Mercury", "Venus", "Mars"}
+        else 6.0
+    )
+    values = np.asarray(
+        core.get_tropical_ecliptic_lons(
+            body,
+            [
+                dt_utc - timedelta(hours=window_hours),
+                dt_utc,
+                dt_utc + timedelta(hours=window_hours),
+            ],
+        ),
+        dtype=float,
+    )
+    past, now, future = map(float, values)
+    speed = core.circular_delta(future, past) / ((2.0 * window_hours) / 24.0)
+    direction = "순행" if speed > 0.002 else "역행" if speed < -0.002 else "정지권"
+    return now, float(speed), direction
 
 def _parse_utc(value):
     raw = str(value or "").strip().replace("Z", "+00:00")
@@ -137,27 +195,33 @@ def _recompute_part_of_fortune(data, sect):
 
 
 def _compute_horary_v5(*args, **kwargs):
-    data = _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
-    if not isinstance(data, dict) or data.get("schema") != "LUNEA_HORARY_V1":
+    token = _REQUEST_LON_CACHE.set({})
+    try:
+        data = _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
+        if not isinstance(data, dict) or data.get("schema") != "LUNEA_HORARY_V1":
+            return data
+
+        sect = _sect_evidence(data)
+        _recompute_part_of_fortune(data, sect)
+
+        meta = data.setdefault("meta", {})
+        meta["horary_engine"] = VERSION
+        meta["sect"] = sect
+        meta["aspect_orb_policy"] = {
+            "method": "planetary_moiety_sum",
+            "full_orbs_deg": dict(HORARY_FULL_ORBS_DEG),
+            "moieties_deg": dict(HORARY_MOIETIES_DEG),
+            "note": "Pair orb = moiety(body A) + moiety(body B), independent of aspect type.",
+        }
         return data
-
-    sect = _sect_evidence(data)
-    _recompute_part_of_fortune(data, sect)
-
-    meta = data.setdefault("meta", {})
-    meta["horary_engine"] = VERSION
-    meta["sect"] = sect
-    meta["aspect_orb_policy"] = {
-        "method": "planetary_moiety_sum",
-        "full_orbs_deg": dict(HORARY_FULL_ORBS_DEG),
-        "moieties_deg": dict(HORARY_MOIETIES_DEG),
-        "note": "Pair orb = moiety(body A) + moiety(body B), independent of aspect type.",
-    }
-    return data
+    finally:
+        _REQUEST_LON_CACHE.reset(token)
 
 
 core._horary_aspect_limit = _moiety_aspect_limit
 core._horary_refine_pair = _vectorized_refine_pair
+core.get_tropical_ecliptic_lons = _request_cached_lons
+core.planet_motion = _request_vector_planet_motion
 v31._is_day_chart = _is_day_chart_altitude
 
 if not getattr(v31.compute_horary, "_lunea_engine_v5", False):
