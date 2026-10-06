@@ -86,6 +86,19 @@ class HoraryPerformanceV2Tests(unittest.TestCase):
         )
         self.assertEqual(scalar, vector)
 
+    def test_moon_exact_events_prepared_keeps_original_contract(self):
+        start = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
+        end = start + timedelta(days=2)
+
+        scalar = perf2._ORIGINAL_EXACT_EVENTS_BETWEEN(
+            "Moon", "Venus", start, end
+        )
+        perf2.clear_caches()
+        prepared = perf2._exact_events_between_moon_cached(
+            "Moon", "Venus", start, end
+        )
+        self.assertEqual(scalar, prepared)
+
     def test_orb_entry_vector_matches_scalar_search_and_refinement(self):
         import horary_future_window_v2 as fw2
 
