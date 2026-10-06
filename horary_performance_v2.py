@@ -213,7 +213,11 @@ def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
         return None
     step_hours = 3.0 if body in {"Moon", "Mercury", "Venus", "Mars"} else 8.0
     end = dt_utc + timedelta(days=float(horizon_days))
-    chunk_days = 45.0
+    chunk_days = (
+        15.0 if body in {"Mercury", "Venus"}
+        else 30.0 if body == "Mars"
+        else 60.0
+    )
     cursor = dt_utc
 
     try:
@@ -243,14 +247,18 @@ def _next_station_vector(body: str, row, dt_utc, horizon_days: float = 180.0):
                 or v6._motion_sign(prev_speed) != v6._motion_sign(speed)
             ):
                 exact = v6._refine_station(body, left, right)
+                edge_speeds = _batch_speeds(
+                    body,
+                    [exact - timedelta(hours=1), exact + timedelta(hours=1)],
+                )
                 return {
                     "type": "station",
                     "body": body,
                     "body_ko": core.PLANET_KO.get(body, body),
                     "utc": exact.isoformat(),
                     "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
-                    "speed_before": round(v6._speed_at(body, exact - timedelta(hours=1)), 6),
-                    "speed_after": round(v6._speed_at(body, exact + timedelta(hours=1)), 6),
+                    "speed_before": round(float(edge_speeds[0]), 6),
+                    "speed_after": round(float(edge_speeds[1]), 6),
                 }
             prev_speed = speed
             left = right
