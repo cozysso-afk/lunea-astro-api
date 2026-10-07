@@ -1,0 +1,112 @@
+name: One-off V6 from pure V5 postprocess probe
+
+on:
+  pull_request:
+    branches:
+      - chore/v6-postprocess-from-v5-base
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Compare current V6 with pure V5 plus V6 postprocess
+        shell: bash
+        run: |
+          cat >/tmp/current_v6.py <<'PY'
+          import json,sys,time
+          root=sys.argv[1]; idx=int(sys.argv[2]); sys.path.insert(0,root)
+          import astro_core as core
+          import horary_topic_routes_v3
+          import horary_engine_v6 as v6
+          import horary_balance_v31 as v31
+          import horary_performance_v2 as perf2
+          import horary_performance_v1 as perf1
+          cases=[
+            ("contact","2026-10-05T18:25:23+09:00","A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?"),
+            ("general","2026-09-04T15:00:00+09:00","이 일은 실제로 성사될까요?"),
+            ("stock","2026-09-30T15:53:00+09:00","10/1 내 보유주식 수익실현이 가능할까?"),
+            ("relationship","2026-09-05T18:11:00+09:00","이 관계는 이어질까요?"),
+          ]
+          topic,moment,q=cases[idx]
+          core.load_ephemeris(); perf2.clear_caches(); perf1.clear_caches()
+          t0=time.perf_counter()
+          out=v31.compute_horary(question_text=q,question_iso=moment,topic=topic,timezone_name="Asia/Seoul",place="현재 위치",lat=34.7594,lon=127.6530)
+          print(f"SECONDS={time.perf_counter()-t0:.6f}")
+          print(json.dumps(out,ensure_ascii=False,sort_keys=True,separators=(",",":")))
+          PY
+
+          cat >/tmp/v5_then_post.py <<'PY'
+          import json,sys,time
+          root=sys.argv[1]; idx=int(sys.argv[2]); sys.path.insert(0,root)
+          import astro_core as core
+          import horary_topic_routes_v3
+          import horary_balance_v31 as v31
+          cases=[
+            ("contact","2026-10-05T18:25:23+09:00","A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?"),
+            ("general","2026-09-04T15:00:00+09:00","이 일은 실제로 성사될까요?"),
+            ("stock","2026-09-30T15:53:00+09:00","10/1 내 보유주식 수익실현이 가능할까?"),
+            ("relationship","2026-09-05T18:11:00+09:00","이 관계는 이어질까요?"),
+          ]
+          topic,moment,q=cases[idx]
+          core.load_ephemeris()
+          t0=time.perf_counter()
+          data=v31.compute_horary(question_text=q,question_iso=moment,topic=topic,timezone_name="Asia/Seoul",place="현재 위치",lat=34.7594,lon=127.6530)
+          v5_elapsed=time.perf_counter()-t0
+
+          import horary_engine_v6 as v6
+          import horary_performance_v2 as perf2
+          import horary_performance_v1 as perf1
+          perf2.clear_caches(); perf1.clear_caches()
+          t1=time.perf_counter()
+          out=v6._postprocess(data,"Asia/Seoul")
+          post_elapsed=time.perf_counter()-t1
+          print(f"V5_SECONDS={v5_elapsed:.6f}")
+          print(f"POST_SECONDS={post_elapsed:.6f}")
+          print(f"TOTAL_SECONDS={v5_elapsed+post_elapsed:.6f}")
+          print(json.dumps(out,ensure_ascii=False,sort_keys=True,separators=(",",":")))
+          PY
+
+          for i in 0 1 2 3; do
+            python /tmp/current_v6.py "$PWD" "$i" >"/tmp/base-$i.out"
+            python /tmp/v5_then_post.py "$PWD" "$i" >"/tmp/head-$i.out"
+            echo "CASE=$i BASE_$(head -n 1 /tmp/base-$i.out)"
+            echo "CASE=$i $(head -n 1 /tmp/head-$i.out)"
+            echo "CASE=$i $(sed -n '2p' /tmp/head-$i.out)"
+            echo "CASE=$i $(sed -n '3p' /tmp/head-$i.out)"
+            tail -n 1 "/tmp/base-$i.out" >"/tmp/base-$i.json"
+            tail -n 1 "/tmp/head-$i.out" >"/tmp/head-$i.json"
+            if cmp -s "/tmp/base-$i.json" "/tmp/head-$i.json"; then
+              echo "CASE=$i V6_FROM_V5_OUTPUT_EXACT_EQUAL=true"
+            else
+              echo "CASE=$i V6_FROM_V5_OUTPUT_EXACT_EQUAL=false"
+              python - "$i" <<'PY'
+          import json,sys
+          i=sys.argv[1]
+          a=json.load(open(f"/tmp/base-{i}.json"))
+          b=json.load(open(f"/tmp/head-{i}.json"))
+          diffs=[]
+          def walk(x,y,path=""):
+              if type(x)!=type(y):
+                  diffs.append((path,x,y)); return
+              if isinstance(x,dict):
+                  for k in sorted(set(x)|set(y)):
+                      if k not in x or k not in y: diffs.append((path+"."+k,x.get(k),y.get(k)))
+                      else: walk(x[k],y[k],path+"."+k)
+              elif isinstance(x,list):
+                  if len(x)!=len(y): diffs.append((path+".len",len(x),len(y)))
+                  for n,(xx,yy) in enumerate(zip(x,y)): walk(xx,yy,f"{path}[{n}]")
+              elif x!=y:
+                  diffs.append((path,x,y))
+          walk(a,b)
+          print("DIFF_COUNT="+str(len(diffs)))
+          for d in diffs[:40]: print("DIFF",repr(d))
+          PY
+            fi
+          done
