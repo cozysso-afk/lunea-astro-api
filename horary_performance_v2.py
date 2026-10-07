@@ -12,6 +12,7 @@ left untouched. Scalar refinement still uses the existing engine functions.
 """
 
 from collections import OrderedDict
+from contextvars import ContextVar
 from datetime import timedelta
 from functools import lru_cache
 import importlib
@@ -29,6 +30,7 @@ import horary_engine_v6 as v6
 VERSION = "LUNEA_HORARY_PERFORMANCE_V2_HOTSPOT_BATCH"
 
 _ORIGINAL_CORE_LON = core.get_tropical_ecliptic_lon
+_ORIGINAL_VECTOR_LONS = core.get_tropical_ecliptic_lons
 _ORIGINAL_COMPUTE_HORARY = v31.compute_horary
 _ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
 _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
@@ -42,6 +44,7 @@ _lon_cache: OrderedDict[tuple[str, float], float] = OrderedDict()
 _lon_lock = RLock()
 _lon_hits = 0
 _lon_misses = 0
+_VECTOR_GRID_CACHE = ContextVar("lunea_advanced_vector_grid_cache", default=None)
 
 
 def _scalar_tt(time_obj) -> float:
@@ -77,13 +80,37 @@ def _cached_core_lon(body_name, time_obj):
 
 
 
+
+def _request_cached_vector_lons(body_name, datetimes_utc):
+    """Reuse an identical vector longitude grid only within one advanced request."""
+    seq = list(datetimes_utc)
+    cache = _VECTOR_GRID_CACHE.get()
+    if cache is None or not seq:
+        return _ORIGINAL_VECTOR_LONS(body_name, seq)
+
+    try:
+        time_key = tuple(dt.astimezone(core.UTC).isoformat() for dt in seq)
+        key = (str(body_name), time_key)
+    except Exception:
+        return _ORIGINAL_VECTOR_LONS(body_name, seq)
+
+    cached = cache.get(key)
+    if cached is not None:
+        return cached.copy()
+
+    values = np.asarray(_ORIGINAL_VECTOR_LONS(body_name, seq), dtype=float)
+    cache[key] = values.copy()
+    return values
+
 def _compute_horary_with_shared_v5_cache(*args, **kwargs):
-    """Keep V5 request-local ephemeris caches alive through opt-in advanced layers."""
+    """Keep request-local ephemeris caches alive through opt-in advanced layers."""
     lon_token = v5._REQUEST_LON_CACHE.set({})
     prepared_token = v5._PREPARED_GRID_CACHE.set({})
+    vector_token = _VECTOR_GRID_CACHE.set({})
     try:
         return _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
     finally:
+        _VECTOR_GRID_CACHE.reset(vector_token)
         v5._PREPARED_GRID_CACHE.reset(prepared_token)
         v5._REQUEST_LON_CACHE.reset(lon_token)
 
@@ -489,6 +516,7 @@ def install() -> bool:
         _refine_station_vector._lunea_horary_perf_v2 = True
 
         core.get_tropical_ecliptic_lon = _cached_core_lon
+        core.get_tropical_ecliptic_lons = _request_cached_vector_lons
         v6._next_sign_ingress = _next_sign_ingress_vector
         v6._previous_sign_ingress = _previous_sign_ingress_vector
         v6._next_station = _next_station_vector
