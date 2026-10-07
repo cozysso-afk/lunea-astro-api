@@ -157,6 +157,30 @@ class HoraryPerformanceV2Tests(unittest.TestCase):
         )
         self.assertEqual(scalar, prepared)
 
+    def test_motion_probe_vector_matches_scalar_contract(self):
+        moment = datetime(2026, 10, 5, 9, 25, 23, tzinfo=timezone.utc)
+        a_lon, a_speed, _ = core.planet_motion("Mercury", moment)
+        b_lon, b_speed, _ = core.planet_motion("Venus", moment)
+        row_a = {"longitude": float(a_lon), "speed_deg_per_day": float(a_speed)}
+        row_b = {"longitude": float(b_lon), "speed_deg_per_day": float(b_speed)}
+        angle = 0.0
+        current_orb = abs(core.angular_separation(float(a_lon), float(b_lon)) - angle)
+
+        token = v6._CONTEXT_DT_UTC.set(moment)
+        try:
+            scalar = perf2._ORIGINAL_ACTUAL_OR_FALLBACK_MOTION(
+                "Mercury", row_a, "Venus", row_b, angle, current_orb
+            )
+            vector = perf2._actual_or_fallback_motion_vector(
+                "Mercury", row_a, "Venus", row_b, angle, current_orb
+            )
+        finally:
+            v6._CONTEXT_DT_UTC.reset(token)
+
+        self.assertEqual(scalar[2:], vector[2:])
+        self.assertAlmostEqual(scalar[0], vector[0], places=12)
+        self.assertAlmostEqual(scalar[1], vector[1], places=12)
+
     def test_orb_entry_vector_matches_scalar_search_and_refinement(self):
         import horary_future_window_v2 as fw2
 
