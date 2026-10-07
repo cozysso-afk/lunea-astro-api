@@ -19,6 +19,8 @@ import sys
 from threading import RLock
 
 import numpy as np
+from skyfield.constants import RAD2DEG
+from skyfield.functions import mxv, to_spherical
 
 import astro_core as core
 import horary_balance_v31 as v31
@@ -36,6 +38,7 @@ _ORIGINAL_NEXT_STATION = v6._next_station
 _ORIGINAL_REFINE_STATION = v6._refine_station
 _ORIGINAL_EXACT_EVENTS_BETWEEN = v6._exact_events_between
 _ORIGINAL_FIND_ORB_ENTRY = None
+_ORIGINAL_PREPARED_MANY_LONS = v5._prepared_many_lons
 
 _LON_CACHE_MAXSIZE = 65536
 _lon_cache: OrderedDict[tuple[str, float], float] = OrderedDict()
@@ -86,6 +89,58 @@ def _compute_horary_with_shared_v5_cache(*args, **kwargs):
     finally:
         v5._PREPARED_GRID_CACHE.reset(prepared_token)
         v5._REQUEST_LON_CACHE.reset(lon_token)
+
+
+def _prepared_many_lons_rotation_cached(body_names, datetimes_utc):
+    """V5 prepared-grid equivalent with one ecliptic rotation per shared grid."""
+    seq = list(datetimes_utc)
+    bodies = tuple(dict.fromkeys(str(body) for body in body_names))
+    if not seq:
+        return {body: np.asarray([], dtype=float) for body in bodies}
+
+    point_cache = v5._REQUEST_LON_CACHE.get()
+    prepared_cache = v5._PREPARED_GRID_CACHE.get()
+    if point_cache is None or prepared_cache is None:
+        return _ORIGINAL_PREPARED_MANY_LONS(bodies, seq)
+
+    time_keys = [dt.astimezone(core.UTC).isoformat() for dt in seq]
+    missing_bodies = [
+        body for body in bodies
+        if any((body, time_key) not in point_cache for time_key in time_keys)
+    ]
+
+    if missing_bodies:
+        grid_key = tuple(time_keys)
+        prepared = prepared_cache.get(grid_key)
+        if prepared is None or len(prepared) != 3:
+            ts, _, earth, targets, _, _, _ = core.load_ephemeris()
+            times = ts.from_datetimes([dt.astimezone(core.UTC) for dt in seq])
+            observer = earth.at(times)
+            rotation = core.ecliptic_frame.rotation_at(times)
+            prepared = (observer, targets, rotation)
+            prepared_cache[grid_key] = prepared
+
+        observer, targets, rotation = prepared
+        for body in missing_bodies:
+            apparent = observer.observe(targets[body]).apparent()
+            vector = mxv(rotation, apparent.xyz.au)
+            _, _, lon_radians = to_spherical(vector)
+            values = np.ravel(np.asarray(lon_radians, dtype=float) * RAD2DEG)
+            if values.size != len(seq):
+                raise ValueError(
+                    f"{body} rotation-cached longitude shape mismatch: "
+                    f"{values.size} values for {len(seq)} datetimes"
+                )
+            for time_key, value in zip(time_keys, values):
+                point_cache[(body, time_key)] = float(value % 360.0)
+
+    return {
+        body: np.asarray(
+            [point_cache[(body, time_key)] for time_key in time_keys],
+            dtype=float,
+        )
+        for body in bodies
+    }
 
 def _motion_window_hours(body: str) -> float:
     if body == "Moon":
@@ -489,6 +544,7 @@ def install() -> bool:
         _refine_station_vector._lunea_horary_perf_v2 = True
 
         core.get_tropical_ecliptic_lon = _cached_core_lon
+        v5._prepared_many_lons = _prepared_many_lons_rotation_cached
         v6._next_sign_ingress = _next_sign_ingress_vector
         v6._previous_sign_ingress = _previous_sign_ingress_vector
         v6._next_station = _next_station_vector
