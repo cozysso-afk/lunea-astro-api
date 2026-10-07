@@ -1,0 +1,80 @@
+name: One-off V6 strict key profile
+
+on:
+  pull_request:
+    branches:
+      - chore/v6-strict-key-profile-base
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Count strict perfection keys
+        shell: bash
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          import time
+
+          import astro_core as core
+          import horary_topic_routes_v3
+          import horary_balance_v3 as v3
+          import horary_balance_v31 as v31
+          import horary_engine_v6 as v6
+          import horary_performance_v2 as perf2
+          import horary_performance_v1 as perf1
+
+          original=v6._strict_perfection_candidate
+          keys=[]
+
+          def row_key(row):
+              return (
+                  float(row.get("longitude") or 0.0),
+                  float(row.get("speed_deg_per_day") or 0.0),
+                  int(row.get("sign_index") or 0),
+              )
+
+          def wrapped(body_a,row_a,body_b,row_b,dt_utc,timezone_name):
+              keys.append((
+                  str(body_a),row_key(row_a),
+                  str(body_b),row_key(row_b),
+                  dt_utc.isoformat(),str(timezone_name),
+              ))
+              return original(body_a,row_a,body_b,row_b,dt_utc,timezone_name)
+
+          core._horary_perfection_candidate=wrapped
+          v3._balanced_perfection_candidate=wrapped
+          v6._strict_perfection_candidate=wrapped
+
+          kwargs=dict(
+              question_text="A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?",
+              question_iso="2026-10-05T18:25:23+09:00",
+              topic="contact",
+              timezone_name="Asia/Seoul",
+              place="현재 위치",
+              lat=34.7594,
+              lon=127.6530,
+          )
+          core.load_ephemeris()
+          perf2.clear_caches(); perf1.clear_caches()
+          t0=time.perf_counter()
+          out=v31.compute_horary(**kwargs)
+          elapsed=time.perf_counter()-t0
+
+          counts=Counter(keys)
+          print(f"STRICT_PROFILE_SECONDS={elapsed:.6f}")
+          print("STRICT_TOTAL_CALLS="+str(len(keys)))
+          print("STRICT_UNIQUE_KEYS="+str(len(counts)))
+          print("STRICT_DUPLICATE_CALLS="+str(len(keys)-len(counts)))
+          print("STRICT_KEY_COUNTS="+repr(sorted(counts.values(),reverse=True)))
+          print("STRICT_PAIRS="+repr([(k[0],k[2],v) for k,v in counts.items()]))
+          print("STRICT_ENGINE="+str((out.get("meta") or {}).get("horary_engine")))
+          assert (out.get("meta") or {}).get("horary_engine")==v6.VERSION
+          PY
