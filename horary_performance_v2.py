@@ -12,6 +12,7 @@ left untouched. Scalar refinement still uses the existing engine functions.
 """
 
 from collections import OrderedDict
+from contextvars import ContextVar
 from datetime import timedelta
 from functools import lru_cache
 import importlib
@@ -34,6 +35,7 @@ _ORIGINAL_NEXT_SIGN_INGRESS = v6._next_sign_ingress
 _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
 _ORIGINAL_REFINE_STATION = v6._refine_station
+_ORIGINAL_REFINE_SIGN_INGRESS = v6._refine_sign_ingress
 _ORIGINAL_EXACT_EVENTS_BETWEEN = v6._exact_events_between
 _ORIGINAL_FIND_ORB_ENTRY = None
 
@@ -42,6 +44,9 @@ _lon_cache: OrderedDict[tuple[str, float], float] = OrderedDict()
 _lon_lock = RLock()
 _lon_hits = 0
 _lon_misses = 0
+_REFINE_INGRESS_CACHE = ContextVar("lunea_v6_refine_ingress_cache", default=None)
+_refine_ingress_hits = 0
+_refine_ingress_misses = 0
 
 
 def _scalar_tt(time_obj) -> float:
@@ -78,14 +83,40 @@ def _cached_core_lon(body_name, time_obj):
 
 
 def _compute_horary_with_shared_v5_cache(*args, **kwargs):
-    """Keep V5 request-local ephemeris caches alive through opt-in advanced layers."""
+    """Keep request-local V5/V6 performance caches alive through advanced layers."""
     lon_token = v5._REQUEST_LON_CACHE.set({})
     prepared_token = v5._PREPARED_GRID_CACHE.set({})
+    ingress_token = _REFINE_INGRESS_CACHE.set({})
     try:
         return _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
     finally:
+        _REFINE_INGRESS_CACHE.reset(ingress_token)
         v5._PREPARED_GRID_CACHE.reset(prepared_token)
         v5._REQUEST_LON_CACHE.reset(lon_token)
+
+
+def _refine_sign_ingress_cached(body: str, left, right, start_sign: int):
+    """Reuse only byte-identical ingress-refinement inputs inside one request."""
+    global _refine_ingress_hits, _refine_ingress_misses
+    cache = _REFINE_INGRESS_CACHE.get()
+    if cache is None:
+        return _ORIGINAL_REFINE_SIGN_INGRESS(body, left, right, start_sign)
+
+    key = (
+        str(body),
+        left.isoformat(),
+        right.isoformat(),
+        int(start_sign),
+    )
+    cached = cache.get(key)
+    if cached is not None:
+        _refine_ingress_hits += 1
+        return cached
+
+    exact = _ORIGINAL_REFINE_SIGN_INGRESS(body, left, right, start_sign)
+    _refine_ingress_misses += 1
+    cache[key] = exact
+    return exact
 
 def _motion_window_hours(body: str) -> float:
     if body == "Moon":
@@ -445,12 +476,14 @@ def _find_orb_entry_vector(body_a: str, body_b: str, angle: float, limit: float,
 
 
 def clear_caches() -> None:
-    global _lon_hits, _lon_misses
+    global _lon_hits, _lon_misses, _refine_ingress_hits, _refine_ingress_misses
     _cached_moon_prepared.cache_clear()
     with _lon_lock:
         _lon_cache.clear()
         _lon_hits = 0
         _lon_misses = 0
+    _refine_ingress_hits = 0
+    _refine_ingress_misses = 0
 
 
 def cache_info() -> dict:
@@ -461,7 +494,11 @@ def cache_info() -> dict:
                 "maxsize": _LON_CACHE_MAXSIZE,
                 "hits": _lon_hits,
                 "misses": _lon_misses,
-            }
+            },
+            "refine_sign_ingress": {
+                "hits": _refine_ingress_hits,
+                "misses": _refine_ingress_misses,
+            },
         }
 
 
@@ -493,6 +530,7 @@ def install() -> bool:
         v6._previous_sign_ingress = _previous_sign_ingress_vector
         v6._next_station = _next_station_vector
         v6._refine_station = _refine_station_vector
+        v6._refine_sign_ingress = _refine_sign_ingress_cached
         v6._exact_events_between = _exact_events_between_moon_cached
         changed = True
 
