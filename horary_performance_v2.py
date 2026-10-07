@@ -36,6 +36,7 @@ _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
 _ORIGINAL_REFINE_STATION = v6._refine_station
 _ORIGINAL_REFINE_SIGN_INGRESS = v6._refine_sign_ingress
+_ORIGINAL_REFINE_EXACT_ASPECT = v6._refine_exact_aspect
 _ORIGINAL_EXACT_EVENTS_BETWEEN = v6._exact_events_between
 _ORIGINAL_FIND_ORB_ENTRY = None
 
@@ -45,8 +46,11 @@ _lon_lock = RLock()
 _lon_hits = 0
 _lon_misses = 0
 _REFINE_INGRESS_CACHE = ContextVar("lunea_v6_refine_ingress_cache", default=None)
+_REFINE_EXACT_CACHE = ContextVar("lunea_v6_refine_exact_cache", default=None)
 _refine_ingress_hits = 0
 _refine_ingress_misses = 0
+_refine_exact_hits = 0
+_refine_exact_misses = 0
 
 
 def _scalar_tt(time_obj) -> float:
@@ -87,9 +91,11 @@ def _compute_horary_with_shared_v5_cache(*args, **kwargs):
     lon_token = v5._REQUEST_LON_CACHE.set({})
     prepared_token = v5._PREPARED_GRID_CACHE.set({})
     ingress_token = _REFINE_INGRESS_CACHE.set({})
+    exact_token = _REFINE_EXACT_CACHE.set({})
     try:
         return _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
     finally:
+        _REFINE_EXACT_CACHE.reset(exact_token)
         _REFINE_INGRESS_CACHE.reset(ingress_token)
         v5._PREPARED_GRID_CACHE.reset(prepared_token)
         v5._REQUEST_LON_CACHE.reset(lon_token)
@@ -117,6 +123,32 @@ def _refine_sign_ingress_cached(body: str, left, right, start_sign: int):
     _refine_ingress_misses += 1
     cache[key] = exact
     return exact
+
+
+def _refine_exact_aspect_cached(body_a: str, body_b: str, angle: float, left, right):
+    """Reuse only identical symmetric exact-refinement brackets per request."""
+    global _refine_exact_hits, _refine_exact_misses
+    cache = _REFINE_EXACT_CACHE.get()
+    if cache is None:
+        return _ORIGINAL_REFINE_EXACT_ASPECT(body_a, body_b, angle, left, right)
+
+    pair = tuple(sorted((str(body_a), str(body_b))))
+    key = (
+        pair[0],
+        pair[1],
+        float(angle),
+        left.isoformat(),
+        right.isoformat(),
+    )
+    cached = cache.get(key)
+    if cached is not None:
+        _refine_exact_hits += 1
+        return cached
+
+    value = _ORIGINAL_REFINE_EXACT_ASPECT(body_a, body_b, angle, left, right)
+    _refine_exact_misses += 1
+    cache[key] = value
+    return value
 
 def _motion_window_hours(body: str) -> float:
     if body == "Moon":
@@ -477,6 +509,7 @@ def _find_orb_entry_vector(body_a: str, body_b: str, angle: float, limit: float,
 
 def clear_caches() -> None:
     global _lon_hits, _lon_misses, _refine_ingress_hits, _refine_ingress_misses
+    global _refine_exact_hits, _refine_exact_misses
     _cached_moon_prepared.cache_clear()
     with _lon_lock:
         _lon_cache.clear()
@@ -484,6 +517,8 @@ def clear_caches() -> None:
         _lon_misses = 0
     _refine_ingress_hits = 0
     _refine_ingress_misses = 0
+    _refine_exact_hits = 0
+    _refine_exact_misses = 0
 
 
 def cache_info() -> dict:
@@ -498,6 +533,10 @@ def cache_info() -> dict:
             "refine_sign_ingress": {
                 "hits": _refine_ingress_hits,
                 "misses": _refine_ingress_misses,
+            },
+            "refine_exact_aspect": {
+                "hits": _refine_exact_hits,
+                "misses": _refine_exact_misses,
             },
         }
 
@@ -531,6 +570,7 @@ def install() -> bool:
         v6._next_station = _next_station_vector
         v6._refine_station = _refine_station_vector
         v6._refine_sign_ingress = _refine_sign_ingress_cached
+        v6._refine_exact_aspect = _refine_exact_aspect_cached
         v6._exact_events_between = _exact_events_between_moon_cached
         changed = True
 
