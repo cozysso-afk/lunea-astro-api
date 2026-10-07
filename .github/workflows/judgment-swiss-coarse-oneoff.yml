@@ -1,0 +1,81 @@
+name: One-off Judgment Swiss coarse probe
+
+on:
+  pull_request:
+    branches:
+      - chore/judgment-swiss-coarse-base
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: chore/judgment-swiss-coarse-base
+          path: base
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          path: head
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: head/requirements.txt
+      - run: pip install -r head/requirements.txt
+      - name: Compare full advanced JSON and runtime
+        shell: bash
+        run: |
+          cat >/tmp/run_advanced.py <<'PY'
+          import json, sys, time
+          sys.path.insert(0, sys.argv[1])
+
+          import astro_core as core
+          import horary_topic_routes_v3
+          import horary_engine_v6
+          import horary_engine_v7
+          import horary_engine_v8
+          import horary_future_window_v2
+          import horary_future_window_v21
+          import horary_judgment_v2
+          import horary_balance_v31 as v31
+          import horary_performance_v2 as perf2
+          import horary_performance_v1 as perf1
+
+          perf2.install_future_window()
+          cases = [
+              ("stock","2026-09-30T22:18:00+09:00","10/1~10/2 보유주식 수익실현 가능한가요?"),
+              ("contact","2026-10-05T18:25:23+09:00","A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?"),
+              ("relationship","2026-09-05T18:11:00+09:00","11월 30일까지 이 관계는 다시 이어질까요?"),
+              ("general","2026-09-04T15:00:00+09:00","2026년 12월 31일까지 이 일은 실제로 성사될까요?"),
+          ]
+
+          core.load_ephemeris()
+          rows=[]
+          t0=time.perf_counter()
+          for topic,moment,q in cases:
+              perf2.clear_caches(); perf1.clear_caches()
+              rows.append(v31.compute_horary(
+                  question_text=q,
+                  question_iso=moment,
+                  topic=topic,
+                  timezone_name="Asia/Seoul",
+                  place="현재 위치",
+                  lat=34.7594,
+                  lon=127.6530,
+              ))
+          print(f"SECONDS={time.perf_counter()-t0:.6f}")
+          print(json.dumps(rows,ensure_ascii=False,sort_keys=True,separators=(",",":")))
+          PY
+
+          (cd base && python /tmp/run_advanced.py "$PWD" >/tmp/base.out)
+          (cd head && python /tmp/run_advanced.py "$PWD" >/tmp/head.out)
+
+          echo "BASE_$(head -n 1 /tmp/base.out)"
+          echo "HEAD_$(head -n 1 /tmp/head.out)"
+          tail -n 1 /tmp/base.out >/tmp/base.json
+          tail -n 1 /tmp/head.out >/tmp/head.json
+          cmp /tmp/base.json /tmp/head.json
+          echo "JUDGMENT_SWISS_COARSE_OUTPUT_EXACT_EQUAL=true"
