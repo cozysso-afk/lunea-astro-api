@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from datetime import timedelta
 
 import horary_topic_routes_v3  # noqa: F401  # installs production V4 -> V5 fast path
 import horary_balance_v31 as v31
@@ -122,6 +123,52 @@ class HoraryJudgmentV2Tests(unittest.TestCase):
             "reception": v2["reception"],
             "confidence": v2["confidence"],
         }, ensure_ascii=False, default=str))
+
+
+    def test_batch_future_exact_hints_match_scalar_searches(self):
+        data = calc(
+            hv2._ORIGINAL_COMPUTE_HORARY,
+            "10/1~10/2 보유주식 수익실현 가능한가요?",
+            "2026-09-30T22:18:00+09:00",
+        )
+        dt_utc = hv2._utc(data["moment"]["utc_iso"])
+        horizon_end = dt_utc + timedelta(days=180)
+        sig = data.get("significators") or {}
+
+        q = sig.get("querent") or {}
+        t = sig.get("quesited") or {}
+        moon = {
+            "ruler": "Moon",
+            "planet": sig.get("moon") or (data.get("planets") or {}).get("Moon"),
+        }
+
+        specs = [
+            ("querent_quesited", q, t),
+            ("moon_quesited", moon, t),
+        ]
+        entries = []
+        scalars = {}
+        for pair_id, left, right in specs:
+            body_a, body_b = left.get("ruler"), right.get("ruler")
+            row_a, row_b = left.get("planet"), right.get("planet")
+            self.assertTrue(body_a and body_b and row_a and row_b)
+            state = hv2.v6._strict_aspect_state(body_a, row_a, body_b, row_b)
+            angle = float(state.get("angle") or 0.0)
+            entries.append({
+                "pair_id": pair_id,
+                "body_a": body_a,
+                "body_b": body_b,
+                "angle": angle,
+            })
+            scalars[pair_id] = hv2._future_exact(
+                body_a, body_b, angle, dt_utc, horizon_end
+            )
+
+        hints = hv2._batch_future_exact_hints(entries, dt_utc, horizon_end)
+        for pair_id, expected in scalars.items():
+            self.assertIn(pair_id, hints)
+            self.assertEqual(hints[pair_id], expected)
+
 
     def test_ruleset_preserves_existing_orb_policy_and_excludes_modern_bodies(self):
         data = calc(v31.compute_horary, "10/1 내 보유주식 수익실현이 가능할까?", "2026-09-30T15:53:00+09:00")
