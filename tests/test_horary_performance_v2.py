@@ -48,6 +48,41 @@ class HoraryPerformanceV2Tests(unittest.TestCase):
         finally:
             perf2._ORIGINAL_COMPUTE_HORARY = original
 
+    def test_ingress_refinement_cache_is_request_local(self):
+        calls = {"count": 0}
+        start = datetime(2026, 10, 5, 9, 0, 0, tzinfo=timezone.utc)
+        end = start + timedelta(minutes=30)
+
+        def fake_refine(body, left, right, start_sign):
+            calls["count"] += 1
+            return right
+
+        original_compute = perf2._ORIGINAL_COMPUTE_HORARY
+        original_refine = perf2._ORIGINAL_REFINE_SIGN_INGRESS
+
+        def fake_compute(*args, **kwargs):
+            self.assertIsInstance(perf2._REFINE_INGRESS_CACHE.get(), dict)
+            first = perf2._refine_sign_ingress_cached("Moon", start, end, 4)
+            second = perf2._refine_sign_ingress_cached("Moon", start, end, 4)
+            return first, second
+
+        perf2._ORIGINAL_COMPUTE_HORARY = fake_compute
+        perf2._ORIGINAL_REFINE_SIGN_INGRESS = fake_refine
+        try:
+            self.assertIsNone(perf2._REFINE_INGRESS_CACHE.get())
+            first, second = perf2._compute_horary_with_shared_v5_cache()
+            self.assertEqual(first, end)
+            self.assertEqual(second, end)
+            self.assertEqual(calls["count"], 1)
+            self.assertIsNone(perf2._REFINE_INGRESS_CACHE.get())
+
+            # Outside the advanced request wrapper, the optimization is off.
+            perf2._refine_sign_ingress_cached("Moon", start, end, 4)
+            self.assertEqual(calls["count"], 2)
+        finally:
+            perf2._ORIGINAL_COMPUTE_HORARY = original_compute
+            perf2._ORIGINAL_REFINE_SIGN_INGRESS = original_refine
+
     def test_identical_scalar_longitude_is_reused_exactly(self):
         calls = {"count": 0}
 
