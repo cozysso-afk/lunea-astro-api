@@ -4,6 +4,8 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import numpy as np
+
 import astro_core as core
 import horary_balance_v31 as v31
 import horary_engine_v6 as v6
@@ -155,7 +157,80 @@ def _future_exact(body_a, body_b, angle, dt_utc, horizon_end):
         return None
 
 
-def _pair_diagnostic(pair_id: str, role_a: str, a: dict, role_b: str, b: dict, data, dt_utc, timezone_name):
+_NO_EXACT_HINT = object()
+
+
+def _batch_future_exact_hints(entries, dt_utc, horizon_end):
+    """Share identical coarse exact-aspect grids across Judgment V2 pairs."""
+    if not entries or horizon_end <= dt_utc:
+        return {}
+
+    span_days = max(0.01, (horizon_end - dt_utc).total_seconds() / 86400.0)
+    groups = {}
+    for entry in entries:
+        body_a = entry["body_a"]
+        body_b = entry["body_b"]
+        step_hours = 0.5 if "Moon" in {body_a, body_b} else 1.5 if span_days < 7 else 3.0
+        groups.setdefault(float(step_hours), []).append(entry)
+
+    hints = {}
+    for step_hours, rows in groups.items():
+        times = list(core._sample_datetimes(dt_utc, horizon_end, step_hours))
+        if len(times) < 2:
+            for row in rows:
+                hints[row["pair_id"]] = None
+            continue
+
+        bodies = tuple(dict.fromkeys(
+            body
+            for row in rows
+            for body in (row["body_a"], row["body_b"])
+        ))
+        try:
+            lons = {
+                body: np.asarray(core.get_tropical_ecliptic_lons(body, times), dtype=float)
+                for body in bodies
+            }
+        except Exception:
+            # Omit this group's hints so each pair falls back to the original path.
+            continue
+
+        for row in rows:
+            body_a = row["body_a"]
+            body_b = row["body_b"]
+            angle = float(row["angle"])
+            try:
+                a_lons = lons[body_a]
+                b_lons = lons[body_b]
+                seps = np.abs((a_lons - b_lons + 180.0) % 360.0 - 180.0)
+                errors = np.abs(seps - angle)
+                idx = int(np.argmin(errors))
+                if idx == 0 or float(errors[idx]) > 1.25:
+                    hints[row["pair_id"]] = None
+                    continue
+                left = times[max(0, idx - 1)]
+                right = times[min(len(times) - 1, idx + 1)]
+                if right <= left:
+                    hints[row["pair_id"]] = None
+                    continue
+                exact, orb = v6._refine_exact_aspect(body_a, body_b, angle, left, right)
+                if exact < dt_utc or exact > horizon_end or orb > v6.ASPECT_EXACT_TOL:
+                    hints[row["pair_id"]] = None
+                    continue
+                hints[row["pair_id"]] = {
+                    "type": "exact_aspect",
+                    "utc": exact.isoformat(),
+                    "days_from_question": round((exact - dt_utc).total_seconds() / 86400.0, 6),
+                    "exact_orb": round(orb, 6),
+                }
+            except Exception:
+                # Preserve original per-pair exception handling if batching fails.
+                continue
+
+    return hints
+
+
+def _pair_diagnostic(pair_id: str, role_a: str, a: dict, role_b: str, b: dict, data, dt_utc, timezone_name, exact_hint=_NO_EXACT_HINT):
     body_a, body_b = a.get("ruler"), b.get("ruler")
     row_a, row_b = a.get("planet"), b.get("planet")
     if not body_a or not body_b or not row_a or not row_b:
@@ -173,7 +248,11 @@ def _pair_diagnostic(pair_id: str, role_a: str, a: dict, role_b: str, b: dict, d
     state = v6._strict_aspect_state(body_a, row_a, body_b, row_b)
     angle = float(state.get("angle") or 0.0)
     horizon_end = dt_utc + timedelta(days=180)
-    exact = _future_exact(body_a, body_b, angle, dt_utc, horizon_end)
+    exact = (
+        _future_exact(body_a, body_b, angle, dt_utc, horizon_end)
+        if exact_hint is _NO_EXACT_HINT
+        else exact_hint
+    )
     exact_dt = _utc(exact["utc"]) if exact and exact.get("utc") else None
 
     orb_entry = None
@@ -282,7 +361,8 @@ def _aspect_applications(data, dt_utc, timezone_name):
         ("moon_quesited", "moon", moon, "quesited", t),
         ("moon_event", "moon", moon, "event", e),
     ]
-    rows = []
+
+    active = []
     seen = set()
     for pair_id, role_a, a, role_b, b in specs:
         if not a or not b:
@@ -293,7 +373,31 @@ def _aspect_applications(data, dt_utc, timezone_name):
         if not pair_id.startswith("moon_") and key in seen:
             continue
         seen.add(key)
-        row = _pair_diagnostic(pair_id, role_a, a, role_b, b, data, dt_utc, timezone_name)
+        active.append((pair_id, role_a, a, role_b, b))
+
+    horizon_end = dt_utc + timedelta(days=180)
+    batch_entries = []
+    for pair_id, _role_a, a, _role_b, b in active:
+        body_a, body_b = a.get("ruler"), b.get("ruler")
+        row_a, row_b = a.get("planet"), b.get("planet")
+        if not body_a or not body_b or not row_a or not row_b or body_a == body_b:
+            continue
+        state = v6._strict_aspect_state(body_a, row_a, body_b, row_b)
+        batch_entries.append({
+            "pair_id": pair_id,
+            "body_a": body_a,
+            "body_b": body_b,
+            "angle": float(state.get("angle") or 0.0),
+        })
+    exact_hints = _batch_future_exact_hints(batch_entries, dt_utc, horizon_end)
+
+    rows = []
+    for pair_id, role_a, a, role_b, b in active:
+        hint = exact_hints[pair_id] if pair_id in exact_hints else _NO_EXACT_HINT
+        row = _pair_diagnostic(
+            pair_id, role_a, a, role_b, b, data, dt_utc, timezone_name,
+            exact_hint=hint,
+        )
         if row:
             rows.append(row)
     return rows
