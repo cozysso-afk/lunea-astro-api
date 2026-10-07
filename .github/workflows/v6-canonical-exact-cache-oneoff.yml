@@ -1,0 +1,93 @@
+name: One-off V6 canonical exact cache
+
+on:
+  pull_request:
+    branches:
+      - chore/v6-canonical-exact-cache-base
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: chore/v6-canonical-exact-cache-base
+          path: base
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          path: head
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: head/requirements.txt
+      - run: pip install -r head/requirements.txt
+      - name: Compare V6 and production V5
+        shell: bash
+        run: |
+          cat >/tmp/run_v6.py <<'PY'
+          import json,sys,time
+          sys.path.insert(0,sys.argv[1])
+          import astro_core as core
+          import horary_topic_routes_v3
+          import horary_engine_v6 as v6
+          import horary_balance_v31 as v31
+          import horary_performance_v2 as perf2
+          import horary_performance_v1 as perf1
+
+          cases=[
+            ("contact","2026-10-05T18:25:23+09:00","A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?"),
+            ("general","2026-09-04T15:00:00+09:00","이 일은 실제로 성사될까요?"),
+            ("stock","2026-09-30T15:53:00+09:00","10/1 내 보유주식 수익실현이 가능할까?"),
+            ("relationship","2026-09-05T18:11:00+09:00","이 관계는 이어질까요?"),
+          ]
+          core.load_ephemeris(); perf2.clear_caches(); perf1.clear_caches()
+          rows=[]; t0=time.perf_counter()
+          for topic,moment,q in cases:
+              rows.append(v31.compute_horary(
+                  question_text=q,question_iso=moment,topic=topic,
+                  timezone_name="Asia/Seoul",place="현재 위치",
+                  lat=34.7594,lon=127.6530))
+          print(f"SECONDS={time.perf_counter()-t0:.6f}")
+          print("PERF1="+str(perf1.cache_info()))
+          assert all((x.get("meta") or {}).get("horary_engine")==v6.VERSION for x in rows)
+          print(json.dumps(rows,ensure_ascii=False,sort_keys=True,separators=(",",":")))
+          PY
+
+          cat >/tmp/run_v5.py <<'PY'
+          import json,sys,time
+          sys.path.insert(0,sys.argv[1])
+          import horary_topic_routes_v3
+          import horary_balance_v31 as v31
+          t0=time.perf_counter()
+          out=v31.compute_horary(
+              question_text="이 일은 실제로 성사될까요?",
+              question_iso="2026-09-04T15:00:00+09:00",
+              topic="general",timezone_name="Asia/Seoul",
+              place="현재 위치",lat=34.7594,lon=127.6530)
+          print(f"SECONDS={time.perf_counter()-t0:.6f}")
+          assert (out.get("meta") or {}).get("horary_engine")=="LUNEA_HORARY_ENGINE_V5_MOIETY_SECT"
+          print(json.dumps(out,ensure_ascii=False,sort_keys=True,separators=(",",":")))
+          PY
+
+          (cd base && python /tmp/run_v6.py "$PWD" >/tmp/base-v6.out)
+          (cd head && python /tmp/run_v6.py "$PWD" >/tmp/head-v6.out)
+          echo "BASE_V6_$(head -n 1 /tmp/base-v6.out)"
+          echo "HEAD_V6_$(head -n 1 /tmp/head-v6.out)"
+          grep '^PERF1=' /tmp/head-v6.out
+          tail -n 1 /tmp/base-v6.out >/tmp/base-v6.json
+          tail -n 1 /tmp/head-v6.out >/tmp/head-v6.json
+          cmp /tmp/base-v6.json /tmp/head-v6.json
+          echo "V6_CANONICAL_EXACT_CACHE_OUTPUT_EXACT_EQUAL=true"
+
+          (cd base && python /tmp/run_v5.py "$PWD" >/tmp/base-v5.out)
+          (cd head && python /tmp/run_v5.py "$PWD" >/tmp/head-v5.out)
+          echo "BASE_V5_$(head -n 1 /tmp/base-v5.out)"
+          echo "HEAD_V5_$(head -n 1 /tmp/head-v5.out)"
+          tail -n 1 /tmp/base-v5.out >/tmp/base-v5.json
+          tail -n 1 /tmp/head-v5.out >/tmp/head-v5.json
+          cmp /tmp/base-v5.json /tmp/head-v5.json
+          echo "PRODUCTION_V5_CANONICAL_EXACT_CACHE_OUTPUT_EXACT_EQUAL=true"
