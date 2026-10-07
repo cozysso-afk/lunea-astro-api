@@ -1,0 +1,58 @@
+name: One-off current V6-only profile
+
+on:
+  pull_request:
+    branches:
+      - chore/current-v6-profile-base
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Profile current V6 only
+        shell: bash
+        run: |
+          python - <<'PY'
+          import cProfile, pstats, time
+          import astro_core as core
+          import horary_topic_routes_v3
+          import horary_engine_v6 as v6
+          import horary_balance_v31 as v31
+          import horary_performance_v2 as perf2
+          import horary_performance_v1 as perf1
+
+          kwargs=dict(
+              question_text="A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?",
+              question_iso="2026-10-05T18:25:23+09:00",
+              topic="contact",
+              timezone_name="Asia/Seoul",
+              place="현재 위치",
+              lat=34.7594,
+              lon=127.6530,
+          )
+
+          core.load_ephemeris()
+          perf2.clear_caches(); perf1.clear_caches()
+
+          prof=cProfile.Profile()
+          t0=time.perf_counter()
+          prof.enable()
+          out=v31.compute_horary(**kwargs)
+          prof.disable()
+          elapsed=time.perf_counter()-t0
+
+          print(f"CURRENT_V6_PROFILE_SECONDS={elapsed:.6f}")
+          print("CURRENT_V6_ENGINE="+str((out.get("meta") or {}).get("horary_engine")))
+          print("PERF1_CACHE_INFO="+str(perf1.cache_info()))
+          print("PERF2_CACHE_INFO="+str(perf2.cache_info()))
+          print("CURRENT_V6_PROFILE_TOP")
+          pstats.Stats(prof).sort_stats("cumulative").print_stats(45)
+          assert (out.get("meta") or {}).get("horary_engine") == v6.VERSION
+          PY
