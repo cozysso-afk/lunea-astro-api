@@ -1,0 +1,74 @@
+name: One-off ingress refine key profile
+
+on:
+  pull_request:
+    branches:
+      - chore/ingress-refine-key-profile-base
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Count exact ingress-refinement key reuse
+        shell: bash
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          import time
+
+          import astro_core as core
+          import horary_topic_routes_v3
+          import horary_engine_v6 as v6
+          import horary_engine_v7
+          import horary_engine_v8
+          import horary_future_window_v2
+          import horary_future_window_v21
+          import horary_judgment_v2
+          import horary_balance_v31 as v31
+          import horary_performance_v2 as perf2
+          import horary_performance_v1 as perf1
+
+          perf2.install_future_window()
+          original=v6._refine_sign_ingress
+          keys=[]
+          outputs=[]
+
+          def wrapped(body,left,right,start_sign):
+              key=(str(body),left.isoformat(),right.isoformat(),int(start_sign))
+              keys.append(key)
+              out=original(body,left,right,start_sign)
+              outputs.append((str(body),int(start_sign),out.isoformat()))
+              return out
+
+          v6._refine_sign_ingress=wrapped
+          core.load_ephemeris(); perf2.clear_caches(); perf1.clear_caches()
+          t0=time.perf_counter()
+          out=v31.compute_horary(
+              question_text="A는 2026년 10월 31일까지 나에게 먼저 사적인 연락을 해올까요?",
+              question_iso="2026-10-05T18:25:23+09:00",
+              topic="contact",
+              timezone_name="Asia/Seoul",
+              place="현재 위치",
+              lat=34.7594,
+              lon=127.6530,
+          )
+          elapsed=time.perf_counter()-t0
+          key_counts=Counter(keys)
+          output_counts=Counter(outputs)
+          print(f"INGRESS_PROFILE_SECONDS={elapsed:.6f}")
+          print("REFINE_TOTAL_CALLS="+str(len(keys)))
+          print("REFINE_UNIQUE_KEYS="+str(len(key_counts)))
+          print("REFINE_EXACT_KEY_DUPLICATES="+str(len(keys)-len(key_counts)))
+          print("REFINE_DUP_KEY_COUNTS="+repr(sorted([v for v in key_counts.values() if v>1],reverse=True)))
+          print("REFINE_OUTPUT_UNIQUE="+str(len(output_counts)))
+          print("REFINE_OUTPUT_DUPLICATES="+str(len(outputs)-len(output_counts)))
+          print("REFINE_DUP_OUTPUT_COUNTS="+repr(sorted([v for v in output_counts.values() if v>1],reverse=True)))
+          print("REFINE_DUP_OUTPUTS="+repr([(k,v) for k,v in output_counts.items() if v>1]))
+          PY
