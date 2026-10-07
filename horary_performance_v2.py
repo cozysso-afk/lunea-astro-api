@@ -12,6 +12,8 @@ left untouched. Scalar refinement still uses the existing engine functions.
 """
 
 from collections import OrderedDict
+from contextvars import ContextVar
+from copy import deepcopy
 from datetime import timedelta
 from functools import lru_cache
 import importlib
@@ -35,6 +37,7 @@ _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
 _ORIGINAL_REFINE_STATION = v6._refine_station
 _ORIGINAL_EXACT_EVENTS_BETWEEN = v6._exact_events_between
+_ORIGINAL_STRICT_MOON_COURSE = v6._strict_moon_course
 _ORIGINAL_FIND_ORB_ENTRY = None
 
 _LON_CACHE_MAXSIZE = 65536
@@ -42,6 +45,7 @@ _lon_cache: OrderedDict[tuple[str, float], float] = OrderedDict()
 _lon_lock = RLock()
 _lon_hits = 0
 _lon_misses = 0
+_MOON_COURSE_REQUEST_CACHE = ContextVar("lunea_v6_moon_course_request_cache", default=None)
 
 
 def _scalar_tt(time_obj) -> float:
@@ -77,13 +81,45 @@ def _cached_core_lon(body_name, time_obj):
 
 
 
+
+def _moon_course_cache_key(planets, dt_utc, timezone_name):
+    rows = []
+    for body in core.HORARY_PLANETS:
+        row = (planets or {}).get(body) or {}
+        rows.append((
+            body,
+            float(row.get("longitude") or 0.0),
+            float(row.get("speed_deg_per_day") or 0.0),
+        ))
+    return (
+        dt_utc.astimezone(core.UTC).isoformat(),
+        str(timezone_name or "Asia/Seoul"),
+        tuple(rows),
+    )
+
+
+def _strict_moon_course_request_cached(planets, dt_utc, timezone_name):
+    cache = _MOON_COURSE_REQUEST_CACHE.get()
+    if cache is None:
+        return _ORIGINAL_STRICT_MOON_COURSE(planets, dt_utc, timezone_name)
+
+    key = _moon_course_cache_key(planets, dt_utc, timezone_name)
+    if key in cache:
+        return deepcopy(cache[key])
+
+    result = _ORIGINAL_STRICT_MOON_COURSE(planets, dt_utc, timezone_name)
+    cache[key] = deepcopy(result)
+    return deepcopy(result)
+
 def _compute_horary_with_shared_v5_cache(*args, **kwargs):
-    """Keep V5 request-local ephemeris caches alive through opt-in advanced layers."""
+    """Keep V5 request-local caches alive through opt-in advanced layers."""
     lon_token = v5._REQUEST_LON_CACHE.set({})
     prepared_token = v5._PREPARED_GRID_CACHE.set({})
+    moon_course_token = _MOON_COURSE_REQUEST_CACHE.set({})
     try:
         return _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
     finally:
+        _MOON_COURSE_REQUEST_CACHE.reset(moon_course_token)
         v5._PREPARED_GRID_CACHE.reset(prepared_token)
         v5._REQUEST_LON_CACHE.reset(lon_token)
 
@@ -494,6 +530,8 @@ def install() -> bool:
         v6._next_station = _next_station_vector
         v6._refine_station = _refine_station_vector
         v6._exact_events_between = _exact_events_between_moon_cached
+        v6._strict_moon_course = _strict_moon_course_request_cached
+        core._horary_moon_course = _strict_moon_course_request_cached
         changed = True
 
     if not getattr(v31.compute_horary, "_lunea_perf_v2_shared_v5_cache", False):
