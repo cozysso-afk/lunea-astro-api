@@ -13,6 +13,7 @@ left untouched. Scalar refinement still uses the existing engine functions.
 
 from collections import OrderedDict
 from contextvars import ContextVar
+from copy import deepcopy
 from datetime import timedelta
 from functools import lru_cache
 import importlib
@@ -36,6 +37,7 @@ _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
 _ORIGINAL_REFINE_STATION = v6._refine_station
 _ORIGINAL_REFINE_SIGN_INGRESS = v6._refine_sign_ingress
+_ORIGINAL_STRICT_ASPECT_STATE = v6._strict_aspect_state
 _ORIGINAL_EXACT_EVENTS_BETWEEN = v6._exact_events_between
 _ORIGINAL_FIND_ORB_ENTRY = None
 
@@ -45,8 +47,11 @@ _lon_lock = RLock()
 _lon_hits = 0
 _lon_misses = 0
 _REFINE_INGRESS_CACHE = ContextVar("lunea_v6_refine_ingress_cache", default=None)
+_ASPECT_STATE_CACHE = ContextVar("lunea_v6_aspect_state_cache", default=None)
 _refine_ingress_hits = 0
 _refine_ingress_misses = 0
+_aspect_state_hits = 0
+_aspect_state_misses = 0
 
 
 def _scalar_tt(time_obj) -> float:
@@ -87,9 +92,11 @@ def _compute_horary_with_shared_v5_cache(*args, **kwargs):
     lon_token = v5._REQUEST_LON_CACHE.set({})
     prepared_token = v5._PREPARED_GRID_CACHE.set({})
     ingress_token = _REFINE_INGRESS_CACHE.set({})
+    aspect_token = _ASPECT_STATE_CACHE.set({})
     try:
         return _ORIGINAL_COMPUTE_HORARY(*args, **kwargs)
     finally:
+        _ASPECT_STATE_CACHE.reset(aspect_token)
         _REFINE_INGRESS_CACHE.reset(ingress_token)
         v5._PREPARED_GRID_CACHE.reset(prepared_token)
         v5._REQUEST_LON_CACHE.reset(lon_token)
@@ -117,6 +124,32 @@ def _refine_sign_ingress_cached(body: str, left, right, start_sign: int):
     _refine_ingress_misses += 1
     cache[key] = exact
     return exact
+
+
+def _strict_aspect_state_cached(body_a, row_a, body_b, row_b):
+    """Reuse identical strict aspect-state inputs only within one advanced request."""
+    global _aspect_state_hits, _aspect_state_misses
+    cache = _ASPECT_STATE_CACHE.get()
+    if cache is None:
+        return _ORIGINAL_STRICT_ASPECT_STATE(body_a, row_a, body_b, row_b)
+
+    key = (
+        str(body_a),
+        float(row_a["longitude"]),
+        float(row_a.get("speed_deg_per_day") or 0.0),
+        str(body_b),
+        float(row_b["longitude"]),
+        float(row_b.get("speed_deg_per_day") or 0.0),
+    )
+    cached = cache.get(key)
+    if cached is not None:
+        _aspect_state_hits += 1
+        return deepcopy(cached)
+
+    result = _ORIGINAL_STRICT_ASPECT_STATE(body_a, row_a, body_b, row_b)
+    _aspect_state_misses += 1
+    cache[key] = deepcopy(result)
+    return result
 
 def _motion_window_hours(body: str) -> float:
     if body == "Moon":
@@ -476,7 +509,7 @@ def _find_orb_entry_vector(body_a: str, body_b: str, angle: float, limit: float,
 
 
 def clear_caches() -> None:
-    global _lon_hits, _lon_misses, _refine_ingress_hits, _refine_ingress_misses
+    global _lon_hits, _lon_misses, _refine_ingress_hits, _refine_ingress_misses, _aspect_state_hits, _aspect_state_misses
     _cached_moon_prepared.cache_clear()
     with _lon_lock:
         _lon_cache.clear()
@@ -484,6 +517,8 @@ def clear_caches() -> None:
         _lon_misses = 0
     _refine_ingress_hits = 0
     _refine_ingress_misses = 0
+    _aspect_state_hits = 0
+    _aspect_state_misses = 0
 
 
 def cache_info() -> dict:
@@ -498,6 +533,10 @@ def cache_info() -> dict:
             "refine_sign_ingress": {
                 "hits": _refine_ingress_hits,
                 "misses": _refine_ingress_misses,
+            },
+            "strict_aspect_state": {
+                "hits": _aspect_state_hits,
+                "misses": _aspect_state_misses,
             },
         }
 
@@ -531,6 +570,8 @@ def install() -> bool:
         v6._next_station = _next_station_vector
         v6._refine_station = _refine_station_vector
         v6._refine_sign_ingress = _refine_sign_ingress_cached
+        v6._strict_aspect_state = _strict_aspect_state_cached
+        core._horary_aspect_state = _strict_aspect_state_cached
         v6._exact_events_between = _exact_events_between_moon_cached
         changed = True
 
