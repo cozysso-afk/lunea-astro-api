@@ -137,6 +137,34 @@ class HoraryPerformanceV1Tests(unittest.TestCase):
             perf._ORIGINAL_SPEED_AT = original
             perf._cached_speed_at.cache_clear()
 
+    def test_reverse_exact_aspect_pair_reuses_same_cache_entry(self):
+        original = perf._ORIGINAL_FIND_EXACT_ASPECT
+        calls = {"count": 0}
+
+        def fake(body_a, body_b, angle, start, end):
+            calls["count"] += 1
+            return {
+                "type": "exact_aspect",
+                "utc": start.isoformat(),
+                "days_from_question": 0.0,
+                "exact_orb": 0.0,
+            }
+
+        perf._ORIGINAL_FIND_EXACT_ASPECT = fake
+        perf._cached_find_exact_aspect.cache_clear()
+        try:
+            start = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
+            end = start.replace(day=5)
+            first = v6._find_exact_aspect("Mars", "Venus", 60.0, start, end)
+            second = v6._find_exact_aspect("Venus", "Mars", 60.0, start, end)
+
+            self.assertEqual(first, second)
+            self.assertEqual(calls["count"], 1)
+            self.assertGreaterEqual(perf._cached_find_exact_aspect.cache_info().hits, 1)
+        finally:
+            perf._ORIGINAL_FIND_EXACT_ASPECT = original
+            perf._cached_find_exact_aspect.cache_clear()
+
     def test_active_identical_horary_job_reuses_existing_job_id(self):
         old_executor = jobs._horary_executor
         fake_executor = _FakeExecutor()
