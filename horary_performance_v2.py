@@ -36,6 +36,7 @@ _ORIGINAL_PREVIOUS_SIGN_INGRESS = v6._previous_sign_ingress
 _ORIGINAL_NEXT_STATION = v6._next_station
 _ORIGINAL_REFINE_STATION = v6._refine_station
 _ORIGINAL_REFINE_SIGN_INGRESS = v6._refine_sign_ingress
+_ORIGINAL_ACTUAL_OR_FALLBACK_MOTION = v6._actual_or_fallback_motion
 _ORIGINAL_EXACT_EVENTS_BETWEEN = v6._exact_events_between
 _ORIGINAL_FIND_ORB_ENTRY = None
 
@@ -117,6 +118,37 @@ def _refine_sign_ingress_cached(body: str, left, right, start_sign: int):
     _refine_ingress_misses += 1
     cache[key] = exact
     return exact
+
+
+def _actual_or_fallback_motion_vector(
+    body_a: str,
+    row_a,
+    body_b: str,
+    row_b,
+    angle: float,
+    current_orb: float,
+):
+    """Preserve V6 motion probes while batching past/future longitude samples."""
+    hours = v6._motion_probe_hours(body_a, body_b)
+    dt_utc = v6._CONTEXT_DT_UTC.get()
+
+    if dt_utc is not None:
+        try:
+            delta = timedelta(hours=hours)
+            times = [dt_utc - delta, dt_utc + delta]
+            a_lons = np.asarray(core.get_tropical_ecliptic_lons(body_a, times), dtype=float)
+            b_lons = np.asarray(core.get_tropical_ecliptic_lons(body_b, times), dtype=float)
+            if a_lons.size != 2 or b_lons.size != 2:
+                raise ValueError("motion probe vector size mismatch")
+            past = abs(core.angular_separation(float(a_lons[0]), float(b_lons[0])) - float(angle))
+            future = abs(core.angular_separation(float(a_lons[1]), float(b_lons[1])) - float(angle))
+            return float(past), float(future), hours, "ephemeris_short_step"
+        except Exception:
+            pass
+
+    return _ORIGINAL_ACTUAL_OR_FALLBACK_MOTION(
+        body_a, row_a, body_b, row_b, angle, current_orb
+    )
 
 def _motion_window_hours(body: str) -> float:
     if body == "Moon":
@@ -531,6 +563,7 @@ def install() -> bool:
         v6._next_station = _next_station_vector
         v6._refine_station = _refine_station_vector
         v6._refine_sign_ingress = _refine_sign_ingress_cached
+        v6._actual_or_fallback_motion = _actual_or_fallback_motion_vector
         v6._exact_events_between = _exact_events_between_moon_cached
         changed = True
 
