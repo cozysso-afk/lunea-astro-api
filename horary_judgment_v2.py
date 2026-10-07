@@ -160,6 +160,31 @@ def _future_exact(body_a, body_b, angle, dt_utc, horizon_end):
 _NO_EXACT_HINT = object()
 
 
+
+def _shared_grid_lons(body_names, datetimes_utc):
+    """Evaluate multiple bodies against one Skyfield time/observer grid."""
+    seq = list(datetimes_utc)
+    bodies = tuple(dict.fromkeys(str(body) for body in body_names))
+    if not seq:
+        return {body: np.asarray([], dtype=float) for body in bodies}
+
+    ts, _, earth, targets, _, _, _ = core.load_ephemeris()
+    times = ts.from_datetimes([dt.astimezone(core.UTC) for dt in seq])
+    observer = earth.at(times)
+
+    out = {}
+    for body in bodies:
+        apparent = observer.observe(targets[body]).apparent()
+        _, lon, _ = apparent.frame_latlon(core.ecliptic_frame)
+        values = np.ravel(np.asarray(lon.degrees, dtype=float))
+        if values.size != len(seq):
+            raise ValueError(
+                f"{body} shared-grid longitude shape mismatch: "
+                f"{values.size} values for {len(seq)} datetimes"
+            )
+        out[body] = np.mod(values, 360.0)
+    return out
+
 def _batch_future_exact_hints(entries, dt_utc, horizon_end):
     """Share identical coarse exact-aspect grids across Judgment V2 pairs."""
     if not entries or horizon_end <= dt_utc:
@@ -187,10 +212,7 @@ def _batch_future_exact_hints(entries, dt_utc, horizon_end):
             for body in (row["body_a"], row["body_b"])
         ))
         try:
-            lons = {
-                body: np.asarray(core.get_tropical_ecliptic_lons(body, times), dtype=float)
-                for body in bodies
-            }
+            lons = _shared_grid_lons(bodies, times)
         except Exception:
             # Omit this group's hints so each pair falls back to the original path.
             continue
