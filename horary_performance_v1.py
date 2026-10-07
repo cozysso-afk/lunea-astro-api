@@ -153,10 +153,13 @@ def _cached_find_exact_aspect(
 
 
 def _find_exact_aspect(body_a: str, body_b: str, angle: float, dt_utc, end_dt):
+    # Exact-aspect timing is symmetric for A/B. Canonicalize only the memo key
+    # so reverse-role callers can reuse the same deterministic search result.
+    pair = tuple(sorted((str(body_a), str(body_b))))
     return deepcopy(
         _cached_find_exact_aspect(
-            str(body_a),
-            str(body_b),
+            pair[0],
+            pair[1],
             float(angle),
             _dt_key(dt_utc),
             _dt_key(end_dt),
