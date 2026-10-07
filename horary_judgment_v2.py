@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import numpy as np
+import swisseph as swe
 
 import astro_core as core
 import horary_balance_v31 as v31
@@ -160,6 +161,32 @@ def _future_exact(body_a, body_b, angle, dt_utc, horizon_end):
 _NO_EXACT_HINT = object()
 
 
+_SWEPH_PLANETS = {
+    "Sun": swe.SUN,
+    "Moon": swe.MOON,
+    "Mercury": swe.MERCURY,
+    "Venus": swe.VENUS,
+    "Mars": swe.MARS,
+    "Jupiter": swe.JUPITER,
+    "Saturn": swe.SATURN,
+}
+
+
+def _swiss_coarse_lons(body: str, times):
+    planet = _SWEPH_PLANETS.get(str(body))
+    if planet is None:
+        raise KeyError(body)
+    flags = swe.FLG_SWIEPH
+    return np.fromiter(
+        (
+            float(swe.calc_ut(core.to_jd_ut(dt), planet, flags)[0][0] % 360.0)
+            for dt in times
+        ),
+        dtype=float,
+        count=len(times),
+    )
+
+
 def _batch_future_exact_hints(entries, dt_utc, horizon_end):
     """Share identical coarse exact-aspect grids across Judgment V2 pairs."""
     if not entries or horizon_end <= dt_utc:
@@ -188,7 +215,7 @@ def _batch_future_exact_hints(entries, dt_utc, horizon_end):
         ))
         try:
             lons = {
-                body: np.asarray(core.get_tropical_ecliptic_lons(body, times), dtype=float)
+                body: _swiss_coarse_lons(body, times)
                 for body in bodies
             }
         except Exception:
